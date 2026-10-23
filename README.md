@@ -40,6 +40,17 @@ In der App unter **Einstellungen → KI** eintragen und „Testen“ tippen. Der
 ### 4. Auf dem Handy installieren
 Adresse in Chrome öffnen → Menü (⋮) → **App installieren** bzw. **Zum Startbildschirm hinzufügen**.
 
+## Gemeinsame Nutzung (weitere Personen)
+
+1. **Besitzer:** In OneDrive den Archivordner (z. B. `11_Dokumentenarchiv`) mit der Microsoft-Adresse der anderen Person teilen, Berechtigung **„Kann bearbeiten“**.
+2. **Mitbenutzer:** Einladungsmail öffnen, App aufrufen, mit dem **eigenen** Microsoft-Konto anmelden.
+3. **Einstellungen → Archivordner → Geteilter Ordner** → „Zugriff erlauben“ (einmalige Microsoft-Bestätigung für geteilte Dateien) → Archiv auswählen.
+   Taucht der Ordner nicht auf: den Freigabelink aus der Einladungsmail einfügen.
+4. Eigenen API-Schlüssel eintragen (am besten ein eigener Schlüssel pro Gerät in der Console des Besitzers).
+
+Mitbenutzer verwenden Struktur und KI-Regeln aus dem geteilten Ordner. „Abgelegt von“ trägt automatisch ihren Namen.
+An der Microsoft-App-Registrierung muss dafür nichts geändert werden.
+
 ## Anpassen
 
 Ordner, Unterordner, KI-Regeln und Dokumenttypen werden in der App unter **Einstellungen** bearbeitet und als

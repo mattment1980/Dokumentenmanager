@@ -70,10 +70,25 @@ export async function logout() {
   await pca.logoutRedirect({ account: acc, postLogoutRedirectUri: appUrl() });
 }
 
-async function token() {
+// Berechtigungen: eigenes OneDrive reicht "Files.ReadWrite". Für einen Ordner, den jemand anderes
+// geteilt hat, braucht Microsoft "Files.ReadWrite.All". Die wird nur bei Bedarf abgefragt.
+export const SHARED_SCOPES = ["User.Read", "Files.ReadWrite.All"];
+let archive = { mode: "own", path: APP.defaultArchiveRoot };
+
+export function setArchive(a) {
+  archive = a && a.mode === "shared" && a.driveId && a.itemId ? a : { mode: "own", path: (a && a.path) || APP.defaultArchiveRoot };
+}
+export function getArchive() {
+  return archive;
+}
+function currentScopes() {
+  return archive.mode === "shared" ? SHARED_SCOPES : APP.scopes;
+}
+
+async function token(scopes = currentScopes()) {
   if (!account) throw new AuthNeeded();
   try {
-    const r = await pca.acquireTokenSilent({ scopes: APP.scopes, account });
+    const r = await pca.acquireTokenSilent({ scopes, account });
     return r.accessToken;
   } catch (e) {
     const interaction = window.msal && e instanceof window.msal.InteractionRequiredAuthError;
@@ -84,6 +99,19 @@ async function token() {
   }
 }
 
+export async function hasSharedAccess() {
+  try {
+    await token(SHARED_SCOPES);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function requestSharedAccess() {
+  await pca.acquireTokenRedirect({ scopes: SHARED_SCOPES, account: account || undefined });
+}
+
 export class AuthNeeded extends Error {
   constructor() {
     super("Anmeldung erforderlich");
@@ -92,11 +120,11 @@ export class AuthNeeded extends Error {
 }
 
 export async function reauth() {
-  await pca.acquireTokenRedirect({ scopes: APP.scopes, account: account || undefined });
+  await pca.acquireTokenRedirect({ scopes: currentScopes(), account: account || undefined });
 }
 
-async function gfetch(path, opts = {}, attempt = 0) {
-  const t = await token();
+async function gfetch(path, opts = {}, attempt = 0, scopes) {
+  const t = await token(scopes);
   const res = await fetch(path.startsWith("http") ? path : GRAPH + path, {
     ...opts,
     headers: { Authorization: `Bearer ${t}`, ...(opts.headers || {}) },
@@ -104,7 +132,7 @@ async function gfetch(path, opts = {}, attempt = 0) {
   if ((res.status === 429 || res.status === 503 || res.status === 504) && attempt < 3) {
     const wait = Math.min(10, Number(res.headers.get("Retry-After")) || 2 * (attempt + 1));
     await new Promise((r) => setTimeout(r, wait * 1000));
-    return gfetch(path, opts, attempt + 1);
+    return gfetch(path, opts, attempt + 1, scopes);
   }
   if (res.status === 401 && attempt < 1) throw new AuthNeeded();
   return res;
@@ -122,7 +150,20 @@ async function graphError(res) {
 }
 
 const enc = (parts) => parts.filter(Boolean).map((p) => encodeURIComponent(p)).join("/");
-const itemUrl = (parts) => (parts.filter(Boolean).length ? `/me/drive/root:/${enc(parts)}:` : "/me/drive/root");
+const rootParts = () => String(archive.path || "").split("/").filter(Boolean);
+// Alle Pfade in dieser Datei sind relativ zum Archivordner.
+function full(rel) {
+  return archive.mode === "shared" ? rel.filter(Boolean) : [...rootParts(), ...rel.filter(Boolean)];
+}
+function baseUrl(parts) {
+  if (archive.mode === "shared") {
+    const b = `/drives/${encodeURIComponent(archive.driveId)}/items/${encodeURIComponent(archive.itemId)}`;
+    return parts.length ? `${b}:/${enc(parts)}:` : b;
+  }
+  return parts.length ? `/me/drive/root:/${enc(parts)}:` : "/me/drive/root";
+}
+const itemUrl = (rel) => baseUrl(full(rel));
+const archiveKey = () => (archive.mode === "shared" ? `s:${archive.driveId}:${archive.itemId}` : `o:${archive.path}`).toLowerCase();
 
 export async function getMe() {
   const r = await gfetch("/me?$select=displayName,givenName");
@@ -153,15 +194,15 @@ export async function writeJson(parts, obj) {
 
 const known = new Set();
 
-export async function ensureFolder(parts) {
-  const clean = parts.filter(Boolean);
+export async function ensureFolder(rel) {
+  const clean = full(rel);
+  // Im geteilten Modus existiert die Basis bereits; im eigenen Modus wird der Archivordner mit angelegt.
   for (let i = 0; i < clean.length; i++) {
     const path = clean.slice(0, i + 1);
-    const key = path.join("/").toLowerCase();
+    const key = archiveKey() + "|" + path.join("/").toLowerCase();
     if (known.has(key)) continue;
     const parent = clean.slice(0, i);
-    const url = parent.length ? `${itemUrl(parent)}/children` : "/me/drive/root/children";
-    const r = await gfetch(url, {
+    const r = await gfetch(`${baseUrl(parent)}/children`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: path[path.length - 1], folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
@@ -172,15 +213,15 @@ export async function ensureFolder(parts) {
 }
 
 // Legt die komplette Ordnerstruktur an. onProgress(done, total)
-export async function ensureStructure(root, structure, onProgress) {
-  const paths = [[root]];
+export async function ensureStructure(structure, onProgress) {
+  const paths = [[]];
   for (const f of structure.folders) {
-    paths.push([root, f.name]);
-    for (const c of f.children || []) paths.push([root, f.name, c.name]);
+    paths.push([f.name]);
+    for (const c of f.children || []) paths.push([f.name, c.name]);
   }
   let done = 0;
   for (const p of paths) {
-    await ensureFolder(p);
+    if (p.length || archive.mode === "own") await ensureFolder(p);
     done++;
     onProgress && onProgress(done, paths.length);
   }
@@ -204,7 +245,8 @@ export async function uploadPdf(folderParts, fileName, bytes, description) {
     const item = await r.json();
     if (description) {
       try {
-        await gfetch(`/me/drive/items/${item.id}`, {
+        const driveId = item.parentReference && item.parentReference.driveId;
+        await gfetch(driveId ? `/drives/${encodeURIComponent(driveId)}/items/${item.id}` : `/me/drive/items/${item.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ description }),
@@ -216,4 +258,64 @@ export async function uploadPdf(folderParts, fileName, bytes, description) {
     return { name, webUrl: item.webUrl, id: item.id };
   }
   throw new Error("Zu viele gleichnamige Dateien");
+}
+
+// ---------- Geteilte Ordner finden ----------
+function fromRemote(ri, fallbackOwner = "") {
+  if (!ri || !ri.folder || !ri.parentReference || !ri.parentReference.driveId) return null;
+  return {
+    driveId: ri.parentReference.driveId,
+    itemId: ri.id,
+    name: ri.name,
+    owner: ri.shared?.owner?.user?.displayName || ri.shared?.sharedBy?.user?.displayName || ri.createdBy?.user?.displayName || fallbackOwner,
+  };
+}
+
+// Liefert die Ordner, die andere mit mir geteilt haben (auch als Verknüpfung unter "Meine Dateien").
+export async function listSharedFolders() {
+  const found = new Map();
+  let anyOk = false;
+  const add = (x) => x && !found.has(x.driveId + x.itemId) && found.set(x.driveId + x.itemId, x);
+  for (const url of ["/me/drive/sharedWithMe?allowexternal=true", "/me/drive/root/children?$top=200"]) {
+    try {
+      const r = await gfetch(url, {}, 0, SHARED_SCOPES);
+      if (!r.ok) continue;
+      anyOk = true;
+      const j = await r.json();
+      for (const it of j.value || []) {
+        if (it.remoteItem) add(fromRemote(it.remoteItem));
+      }
+    } catch (e) {
+      if (e instanceof AuthNeeded) throw e;
+    }
+  }
+  if (!anyOk) throw new Error("Geteilte Ordner konnten nicht abgerufen werden.");
+  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+}
+
+// Löst einen Freigabelink (aus der Einladungsmail oder "Link kopieren") zu einem Ordner auf.
+export async function resolveShareLink(link) {
+  const b64 = btoa(unescape(encodeURIComponent(link.trim()))).replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
+  const r = await gfetch(`/shares/u!${b64}/driveItem`, { headers: { Prefer: "redeemSharingLink" } }, 0, SHARED_SCOPES);
+  if (!r.ok) throw await graphError(r);
+  const it = await r.json();
+  const target = it.remoteItem || it;
+  if (!target.folder) throw new Error("Der Link zeigt nicht auf einen Ordner.");
+  const driveId = target.parentReference?.driveId;
+  if (!driveId) throw new Error("Ordner konnte nicht zugeordnet werden.");
+  return { driveId, itemId: target.id, name: target.name, owner: target.shared?.owner?.user?.displayName || target.createdBy?.user?.displayName || "" };
+}
+
+// Prüft, ob im gewählten Ordner eine Konfiguration liegt (also ob es ein Dokumentenmanager-Archiv ist).
+export async function probeArchive(a, configName) {
+  const prev = archive;
+  try {
+    setArchive({ mode: "shared", ...a });
+    const r = await gfetch(itemUrl([configName]));
+    if (r.status === 404) return false;
+    if (!r.ok) throw await graphError(r);
+    return true;
+  } finally {
+    archive = prev;
+  }
 }

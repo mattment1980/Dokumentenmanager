@@ -12,6 +12,8 @@ const S = {
   account: null,
   me: null,
   root: settings.get("root", APP.defaultArchiveRoot),
+  archive: null,
+  configMissing: false,
   structure: settings.get("structure", null) || clone(DEFAULT_STRUCTURE),
   configLoaded: false,
   authProblem: false,
@@ -145,6 +147,30 @@ function uploaderName() {
   return n.split(/\s+/)[0] || "Unbekannt";
 }
 
+// ---------- Archivordner (eigen oder geteilt) ----------
+function initArchive() {
+  const a = settings.get("archive", null);
+  S.archive = a && a.mode === "shared" && a.driveId ? a : { mode: "own", path: S.root };
+  od.setArchive(S.archive);
+}
+function setArchive(a) {
+  S.archive = a;
+  if (a.mode === "own") {
+    S.root = a.path;
+    settings.set("root", a.path);
+  }
+  settings.set("archive", a);
+  od.setArchive(a);
+}
+function archiveLabel() {
+  return S.archive.mode === "shared" ? S.archive.name : S.archive.path;
+}
+function archiveLong() {
+  return S.archive.mode === "shared"
+    ? `„${S.archive.name}“ (geteilt${S.archive.owner ? " von " + S.archive.owner : ""})`
+    : `„${S.archive.path}“ in deinem OneDrive`;
+}
+
 // ---------- Start ----------
 async function start() {
   if ("serviceWorker" in navigator) {
@@ -159,6 +185,7 @@ async function start() {
       location.reload();
     });
   }
+  initArchive();
   if (!S.clientId) return resetTo("setup");
   try {
     S.account = await od.initAuth(S.clientId);
@@ -168,6 +195,12 @@ async function start() {
   }
   if (!S.account) return resetTo("login");
   resetTo("home");
+  if (settings.get("pendingShared", false)) {
+    // Rückkehr von der Freigabe für geteilte Ordner
+    settings.set("pendingShared", null);
+    S.stack = ["home", "settings", "shared"];
+    render();
+  }
   afterLogin();
 }
 
@@ -184,23 +217,30 @@ async function afterLogin() {
 
 async function loadRemoteConfig() {
   try {
-    const remote = await od.readJson([S.root, APP.configFileName]);
+    const remote = await od.readJson([APP.configFileName]);
     if (remote && Array.isArray(remote.folders) && Array.isArray(remote.doctypes)) {
       S.structure = remote;
       settings.set("structure", remote);
       S.configLoaded = true;
+      S.configMissing = false;
+      return;
+    }
+    if (S.archive.mode === "shared") {
+      // Im geteilten Ordner wird nie eine eigene Struktur angelegt: die kommt vom Besitzer.
+      S.configMissing = true;
+      toast("Im geteilten Ordner fehlt die Konfiguration des Dokumentenmanagers.", 6000);
       return;
     }
     // Erster Start: Struktur anlegen und Konfiguration speichern
     busy("Ordnerstruktur wird in OneDrive angelegt …");
     const st = S.structure && S.structure.folders?.length ? S.structure : clone(DEFAULT_STRUCTURE);
-    await od.ensureStructure(S.root, st, (d, t) => busyText(`Ordnerstruktur wird in OneDrive angelegt … ${d}/${t}`));
-    await od.writeJson([S.root, APP.configFileName], st);
+    await od.ensureStructure(st, (d, t) => busyText(`Ordnerstruktur wird in OneDrive angelegt … ${d}/${t}`));
+    await od.writeJson([APP.configFileName], st);
     S.structure = st;
     settings.set("structure", st);
     S.configLoaded = true;
     unbusy();
-    toast(`Ordnerstruktur in „${S.root}“ angelegt`);
+    toast(`Ordnerstruktur in „${archiveLabel()}“ angelegt`);
   } catch (e) {
     unbusy();
     if (e instanceof od.AuthNeeded) S.authProblem = true;
@@ -223,8 +263,19 @@ async function processQueue() {
     for (const it of items) {
       if (!navigator.onLine) break;
       try {
-        const res = await od.uploadPdf(it.folderParts, it.fileName, it.bytes, it.description);
-        await history.add({ id: it.id, created: Date.now(), name: res.name, path: it.folderParts.join(" / "), webUrl: res.webUrl });
+        // Ältere Einträge enthielten den Archivordner noch im Pfad
+        const rel = it.rel || (it.folderParts || []).slice(1);
+        const target = it.archive || S.archive;
+        const prev = od.getArchive();
+        od.setArchive(target);
+        let res;
+        try {
+          res = await od.uploadPdf(rel, it.fileName, it.bytes, it.description);
+        } finally {
+          od.setArchive(prev);
+        }
+        const label = target.mode === "shared" ? target.name : target.path;
+        await history.add({ id: it.id, created: Date.now(), name: res.name, path: [label, ...rel].join(" / "), webUrl: res.webUrl });
         await queue.remove(it.id);
         lastOk = { id: it.id, ...res };
         S.authProblem = false;
@@ -286,7 +337,7 @@ screens.login = {
       <div class="center">
         <img src="icons/icon-192.png" alt="" width="96" height="96" style="border-radius:22px">
         <div><h2 style="margin:0 0 6px">Willkommen</h2>
-        <p class="muted">Melde dich mit deinem Microsoft-Konto an. Die Dokumente werden in deinem OneDrive im Ordner „${esc(S.root)}“ abgelegt.</p></div>
+        <p class="muted">Melde dich mit deinem Microsoft-Konto an. Die Dokumente werden im Archiv ${esc(archiveLong())} abgelegt.</p></div>
         ${S.setupError ? `<div class="banner err">${esc(S.setupError)}</div>` : ""}
         <button class="btn primary block" id="login">Mit Microsoft anmelden</button>
       </div>`;
@@ -307,7 +358,8 @@ screens.home = {
     if (S.stack[S.stack.length - 1] !== "home") return;
     const name = S.me?.givenName || S.account?.name?.split(" ")[0] || "";
     app.innerHTML = `${topbar(APP.name, { back: false, gear: true, sub: name ? `Hallo ${name}` : "" })}
-      ${S.authProblem ? `<div class="banner warn"><span class="grow">Die Anmeldung ist abgelaufen.</span><button class="btn small" id="reauth">Neu anmelden</button></div>` : ""}
+      ${S.configMissing ? `<div class="banner err"><span class="grow">Im gewählten geteilten Ordner fehlt die Konfiguration. Bitte in den Einstellungen den richtigen Archivordner wählen.</span></div>` : ""}
+      ${S.authProblem ? `<div class="banner warn"><span class="grow">${S.archive.mode === "shared" ? "Bitte die Anmeldung bzw. den Zugriff auf den geteilten Ordner erneuern." : "Die Anmeldung ist abgelaufen."}</span><button class="btn small" id="reauth">Neu anmelden</button></div>` : ""}
       ${pending.length ? `<div class="banner info"><span class="grow">${pending.length} Dokument${pending.length > 1 ? "e warten" : " wartet"} auf das Hochladen${navigator.onLine ? "" : " (offline)"}.${pending[0].lastError ? `<br><span class="small">${esc(pending[0].lastError)}</span>` : ""}</span>${navigator.onLine && !S.authProblem ? `<button class="btn small" id="retry">Jetzt</button>` : ""}</div>` : ""}
       <button class="hero" id="scan">${I.camera}<span>Dokument scannen</span></button>
       <button class="btn block" id="pick">${I.file} Foto oder PDF auswählen</button>
@@ -731,7 +783,7 @@ screens.review = {
     const d = S.draft;
     const v = validate(d);
     const name = currentFileName(d);
-    $("#pv").innerHTML = `${esc(name)}<div class="path">${esc([S.root, d.folder || "…", d.subfolder].filter(Boolean).join(" / "))}</div>${v ? `<div class="path" style="color:var(--warn)">${esc(v)}</div>` : ""}`;
+    $("#pv").innerHTML = `${esc(name)}<div class="path">${esc([archiveLabel(), d.folder || "…", d.subfolder].filter(Boolean).join(" / "))}</div>${v ? `<div class="path" style="color:var(--warn)">${esc(v)}</div>` : ""}`;
     $("#save").disabled = !!v;
   },
 };
@@ -756,7 +808,8 @@ async function saveDocument() {
   const d = S.draft;
   if (validate(d)) return;
   const fileName = currentFileName(d);
-  const folderParts = [S.root, d.folder, d.subfolder].filter(Boolean);
+  const rel = [d.folder, d.subfolder].filter(Boolean);
+  const folderParts = [archiveLabel(), ...rel];
   const who = uploaderName();
   const today = new Date().toLocaleDateString("de-DE");
   const description = `Abgelegt von: ${who} am ${today} · Dokumenttyp: ${d.doctype} · Absender: ${d.sender.trim()}`;
@@ -772,7 +825,7 @@ async function saveDocument() {
       });
     }
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await queue.add({ id, created: Date.now(), folderParts, fileName, bytes, description });
+    await queue.add({ id, created: Date.now(), rel, archive: clone(S.archive), fileName, bytes, description });
     let res = null;
     if (navigator.onLine) {
       res = await processQueue();
@@ -822,6 +875,91 @@ screens.done = {
   },
 };
 
+// ---------- Bildschirm: Geteilten Ordner wählen ----------
+screens.shared = {
+  async render() {
+    app.innerHTML = `${topbar("Geteilter Ordner", { sub: "Archiv, das jemand mit dir geteilt hat" })}
+      <div class="center"><div class="spinner"></div><div class="muted">Berechtigung wird geprüft …</div></div>`;
+    if (!S.account) {
+      app.innerHTML = `${topbar("Geteilter Ordner")}<div class="card"><p class="muted">Bitte zuerst anmelden.</p></div>`;
+      return;
+    }
+    const ok = await od.hasSharedAccess();
+    if (S.stack[S.stack.length - 1] !== "shared") return;
+    if (!ok) {
+      app.innerHTML = `${topbar("Geteilter Ordner")}
+        <div class="card stack">
+          <h2>Zugriff auf geteilte Ordner erlauben</h2>
+          <p class="muted">Um in einen Ordner zu schreiben, den jemand anderes mit dir geteilt hat, braucht die App eine zusätzliche Erlaubnis von Microsoft. Du wirst kurz zu Microsoft weitergeleitet und bestätigst dort mit „Akzeptieren“.</p>
+          <button class="btn primary block" id="grant">Zugriff erlauben</button>
+        </div>`;
+      $("#grant").onclick = async () => {
+        settings.set("pendingShared", true);
+        try {
+          await od.requestSharedAccess();
+        } catch (e) {
+          settings.set("pendingShared", null);
+          toast("Freigabe fehlgeschlagen: " + (e.message || e), 6000);
+        }
+      };
+      return;
+    }
+    app.innerHTML = `${topbar("Geteilter Ordner", { sub: "Archiv auswählen" })}
+      <div class="card"><h2>Mit dir geteilte Ordner</h2><div id="list"><div class="center" style="padding:16px"><div class="spinner"></div></div></div></div>
+      <div class="card stack">
+        <h2>Oder per Freigabelink</h2>
+        <p class="muted small">Falls der Ordner oben nicht auftaucht: den Link aus der Einladungsmail bzw. aus „Link kopieren“ in OneDrive hier einfügen.</p>
+        <input type="text" id="link" placeholder="https://1drv.ms/…" autocomplete="off" spellcheck="false">
+        <button class="btn small" id="useLink">Link verwenden</button>
+      </div>`;
+    $("#useLink").onclick = async () => {
+      const v = $("#link").value.trim();
+      if (!/^https?:\/\//.test(v)) return toast("Bitte einen vollständigen Link einfügen.");
+      busy("Link wird geprüft …");
+      try {
+        const f = await od.resolveShareLink(v);
+        unbusy();
+        await choose(f);
+      } catch (e) {
+        unbusy();
+        toast(String(e.message || e), 6000);
+      }
+    };
+    try {
+      const folders = await od.listSharedFolders();
+      if (S.stack[S.stack.length - 1] !== "shared") return;
+      $("#list").innerHTML = folders.length
+        ? `<ul class="list">${folders.map((f, i) => `<li><button class="btn block" data-i="${i}" style="justify-content:flex-start;text-align:left">${I.file}<span><b>${esc(f.name)}</b>${f.owner ? `<br><span class="small muted">von ${esc(f.owner)}</span>` : ""}</span></button></li>`).join("")}</ul>`
+        : `<p class="muted">Keine geteilten Ordner gefunden. Wurde die Einladung schon angenommen? Sonst den Freigabelink unten verwenden.</p>`;
+      $$("#list [data-i]").forEach((b) => (b.onclick = () => choose(folders[Number(b.dataset.i)])));
+    } catch (e) {
+      $("#list").innerHTML = `<p class="muted">${esc(e.message || e)}</p>`;
+    }
+
+    async function choose(f) {
+      busy("Archiv wird geprüft …");
+      try {
+        const isArchive = await od.probeArchive(f, APP.configFileName);
+        if (!isArchive) {
+          unbusy();
+          return toast(`„${f.name}“ ist kein Dokumentenmanager-Archiv. Bitte den Archivordner wählen (z. B. 11_Dokumentenarchiv).`, 6000);
+        }
+        setArchive({ mode: "shared", driveId: f.driveId, itemId: f.itemId, name: f.name, owner: f.owner || "" });
+        S.configMissing = false;
+        await loadRemoteConfig();
+        S.edit = clone(S.structure);
+        unbusy();
+        toast(`Archiv „${f.name}“ wird verwendet ✓`);
+        window.history.back();
+      } catch (e) {
+        unbusy();
+        if (e instanceof od.AuthNeeded) toast("Bitte Zugriff erneut erlauben.", 5000);
+        else toast(String(e.message || e), 6000);
+      }
+    }
+  },
+};
+
 // ---------- Bildschirm: Einstellungen ----------
 screens.settings = {
   render() {
@@ -836,9 +974,19 @@ screens.settings = {
       </div>
 
       <div class="card stack">
-        <h2>Archivordner in OneDrive</h2>
-        <label class="field" style="margin:0"><span>Pfad ab OneDrive-Hauptebene</span><input type="text" id="root" value="${esc(S.root)}"></label>
-        <button class="btn small" id="saveRoot">Ordner übernehmen</button>
+        <h2>Archivordner</h2>
+        <div class="seg" id="amode">
+          <button data-m="own" class="${S.archive.mode === "own" ? "on" : ""}">Eigenes OneDrive</button>
+          <button data-m="shared" class="${S.archive.mode === "shared" ? "on" : ""}">Geteilter Ordner</button>
+        </div>
+        ${S.archive.mode === "own" ? `
+          <label class="field" style="margin:0"><span>Pfad ab OneDrive-Hauptebene</span><input type="text" id="root" value="${esc(S.root)}"></label>
+          <button class="btn small" id="saveRoot">Ordner übernehmen</button>` : `
+          <dl class="kv"><dt>Ordner</dt><dd>${esc(S.archive.name)}</dd>${S.archive.owner ? `<dt>Geteilt von</dt><dd>${esc(S.archive.owner)}</dd>` : ""}</dl>
+          <button class="btn small" id="pickShared">Anderen geteilten Ordner wählen</button>`}
+        <p class="muted small" style="margin:0">${S.archive.mode === "own"
+          ? "Für Mitbenutzer: diesen Ordner in OneDrive mit „Kann bearbeiten“ teilen. Sie wählen dann hier „Geteilter Ordner“."
+          : "Struktur und KI-Regeln kommen aus diesem Ordner. Änderungen daran gelten für alle, die ihn nutzen."}</p>
       </div>
 
       <div class="card stack">
@@ -895,16 +1043,27 @@ screens.settings = {
     this.renderDoctypes();
 
     $("#logout") && ($("#logout").onclick = () => od.logout());
-    $("#saveRoot").onclick = async () => {
-      const parts = $("#root").value.split(/[\/\\]/).map(cleanFolderName).filter(Boolean);
-      if (!parts.length) return toast("Bitte einen Ordnernamen eingeben.");
-      S.root = parts.join("/");
-      settings.set("root", S.root);
-      toast(`Archivordner: ${S.root}`);
+    $("#amode").onclick = async (e) => {
+      const b = e.target.closest("[data-m]");
+      if (!b || b.dataset.m === S.archive.mode) return;
+      if (b.dataset.m === "shared") return go("shared");
+      setArchive({ mode: "own", path: S.root || APP.defaultArchiveRoot });
+      S.configMissing = false;
+      toast("Eigenes OneDrive wird verwendet");
       await loadRemoteConfig();
       S.edit = clone(S.structure);
       render();
     };
+    $("#pickShared") && ($("#pickShared").onclick = () => go("shared"));
+    $("#saveRoot") && ($("#saveRoot").onclick = async () => {
+      const parts = $("#root").value.split(/[\/\\]/).map(cleanFolderName).filter(Boolean);
+      if (!parts.length) return toast("Bitte einen Ordnernamen eingeben.");
+      setArchive({ mode: "own", path: parts.join("/") });
+      toast(`Archivordner: ${S.root}`);
+      await loadRemoteConfig();
+      S.edit = clone(S.structure);
+      render();
+    });
     $("#saveKey").onclick = () => {
       const v = $("#key").value.trim();
       if (!v) return toast("Bitte Schlüssel einfügen.");
@@ -1055,8 +1214,8 @@ screens.settings = {
     if (!S.account) return toast("Bitte zuerst anmelden.");
     busy("Struktur wird gespeichert …");
     try {
-      await od.ensureStructure(S.root, st, (d, t) => busyText(`Ordner werden geprüft … ${d}/${t}`));
-      await od.writeJson([S.root, APP.configFileName], st);
+      await od.ensureStructure(st, (d, t) => busyText(`Ordner werden geprüft … ${d}/${t}`));
+      await od.writeJson([APP.configFileName], st);
       S.structure = st;
       settings.set("structure", st);
       S.edit = clone(st);
