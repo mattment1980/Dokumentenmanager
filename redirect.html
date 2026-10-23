@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://graph.microsoft.com https://login.microsoftonline.com https://login.live.com https://api.anthropic.com https://*.1drv.com https://*.microsoftpersonalcontent.com https://*.livefilestore.com https://*.sharepoint.com; frame-src https://login.microsoftonline.com https://login.live.com; form-action https://login.microsoftonline.com https://login.live.com; base-uri 'self'; object-src 'none'; worker-src 'self'; manifest-src 'self'">
+  <meta name="referrer" content="no-referrer">
+  <title>Anmeldung</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 16px system-ui, sans-serif; background: #f5f2ec; color: #1d2733; }
+    @media (prefers-color-scheme: dark) { body { background: #12171d; color: #e9edf1; } }
+  </style>
+</head>
+<body>
+  <p id="msg">Anmeldung wird abgeschlossen …</p>
+  <script src="vendor/msal-redirect-bridge.min.js"></script>
+  <script src="redirect.js"></script>
+</body>
+</html>
