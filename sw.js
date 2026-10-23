@@ -1,7 +1,7 @@
 // Service Worker: App startet auch offline. Eigene Dateien zuerst aus dem Netz (damit Updates sofort
 // ankommen), bei fehlender Verbindung aus dem Zwischenspeicher. Anfragen an Microsoft und Anthropic
 // werden nie zwischengespeichert.
-const CACHE = "dm-v1.2.0";
+const CACHE = "dm-v1.2.1";
 const SHELL = [
   "./",
   "index.html",

@@ -261,14 +261,18 @@ export async function uploadPdf(folderParts, fileName, bytes, description) {
 }
 
 // ---------- Geteilte Ordner finden ----------
-function fromRemote(ri, fallbackOwner = "") {
-  if (!ri || !ri.folder || !ri.parentReference || !ri.parentReference.driveId) return null;
-  return {
-    driveId: ri.parentReference.driveId,
-    itemId: ri.id,
-    name: ri.name,
-    owner: ri.shared?.owner?.user?.displayName || ri.shared?.sharedBy?.user?.displayName || ri.createdBy?.user?.displayName || fallbackOwner,
-  };
+function fromRemote(outer) {
+  // Microsoft liefert die Angaben je nach Kontotyp mal am Eintrag selbst, mal unter "remoteItem".
+  const ri = outer.remoteItem || {};
+  const isFolder = !!(ri.folder || outer.folder || ri.package?.type === "folder");
+  const driveId = ri.parentReference?.driveId || outer.parentReference?.driveId;
+  const itemId = ri.id || outer.id;
+  const name = ri.name || outer.name || "";
+  if (!isFolder || !driveId || !itemId || !name) return null;
+  const owner =
+    ri.shared?.owner?.user?.displayName || ri.shared?.sharedBy?.user?.displayName ||
+    outer.shared?.owner?.user?.displayName || ri.createdBy?.user?.displayName || outer.createdBy?.user?.displayName || "";
+  return { driveId, itemId, name, owner };
 }
 
 // Liefert die Ordner, die andere mit mir geteilt haben (auch als Verknüpfung unter "Meine Dateien").
@@ -283,14 +287,14 @@ export async function listSharedFolders() {
       anyOk = true;
       const j = await r.json();
       for (const it of j.value || []) {
-        if (it.remoteItem) add(fromRemote(it.remoteItem));
+        if (it.remoteItem) add(fromRemote(it));
       }
     } catch (e) {
       if (e instanceof AuthNeeded) throw e;
     }
   }
   if (!anyOk) throw new Error("Geteilte Ordner konnten nicht abgerufen werden.");
-  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  return [...found.values()].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "de"));
 }
 
 // Löst einen Freigabelink (aus der Einladungsmail oder "Link kopieren") zu einem Ordner auf.
@@ -299,11 +303,9 @@ export async function resolveShareLink(link) {
   const r = await gfetch(`/shares/u!${b64}/driveItem`, { headers: { Prefer: "redeemSharingLink" } }, 0, SHARED_SCOPES);
   if (!r.ok) throw await graphError(r);
   const it = await r.json();
-  const target = it.remoteItem || it;
-  if (!target.folder) throw new Error("Der Link zeigt nicht auf einen Ordner.");
-  const driveId = target.parentReference?.driveId;
-  if (!driveId) throw new Error("Ordner konnte nicht zugeordnet werden.");
-  return { driveId, itemId: target.id, name: target.name, owner: target.shared?.owner?.user?.displayName || target.createdBy?.user?.displayName || "" };
+  const f = it.remoteItem ? fromRemote(it) : fromRemote({ remoteItem: it });
+  if (!f) throw new Error("Der Link zeigt nicht auf einen Ordner oder der Ordner konnte nicht zugeordnet werden.");
+  return f;
 }
 
 // Prüft, ob im gewählten Ordner eine Konfiguration liegt (also ob es ein Dokumentenmanager-Archiv ist).
