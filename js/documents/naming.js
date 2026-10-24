@@ -1,4 +1,9 @@
-// Dateinamen nach dem Schema JJJJ-MM-TT_Absender_Dokumenttyp_Titel.pdf
+/**
+ * Dateinamen nach dem Schema JJJJ-MM-TT_Absender_Dokumenttyp_Titel.<endung>
+ * (z. B. 2026-10-14_Finanzamt_Bescheid_Einkommensteuer-2025.pdf)
+ *
+ * Reine Funktionen ohne Seiteneffekte – in tests/unit/naming.test.mjs abgedeckt.
+ */
 
 export function todayIso() {
   const d = new Date();
@@ -29,18 +34,21 @@ export function cleanPart(s, maxLen = 60) {
   return out;
 }
 
-export function buildFileName({ date, sender, doctypeShort, title }) {
+export function buildFileName({ date, sender, doctypeShort, title, ext = "pdf" }) {
+  const e = String(ext || "pdf").toLowerCase().replace(/[^a-z0-9]/g, "") || "pdf";
   const parts = [
     isValidIsoDate(date) ? date : todayIso(),
     cleanPart(sender, 30) || "Unbekannt",
     cleanPart(doctypeShort, 20) || "Info",
     cleanPart(title, 60) || "Dokument",
   ];
-  return parts.join("_") + ".pdf";
+  return parts.join("_") + "." + e;
 }
 
+/** Hängt "-n" vor der Dateiendung an: a_b.pdf → a_b-2.pdf */
 export function withSuffix(fileName, n) {
-  return fileName.replace(/\.pdf$/i, "") + `-${n}.pdf`;
+  const m = String(fileName).match(/^(.*?)(\.[A-Za-z0-9]{1,8})?$/);
+  return `${m[1]}-${n}${m[2] || ""}`;
 }
 
 // Ordnernamen für OneDrive prüfen (beim Bearbeiten der Struktur).

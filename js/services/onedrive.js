@@ -1,6 +1,17 @@
-// Microsoft-Anmeldung (MSAL) und OneDrive-Zugriff (Microsoft Graph).
-import { APP } from "./config.js";
-import { withSuffix } from "./naming.js";
+/**
+ * Microsoft-Anmeldung (MSAL) und OneDrive-Zugriff (Microsoft Graph).
+ *
+ * Alle Pfade sind relativ zum aktiven Archivordner (setArchive). Das Archiv ist entweder
+ *   { mode: "own", path: "11_Dokumentenarchiv" }                     – im eigenen OneDrive
+ *   { mode: "shared", driveId, itemId, name, owner }                 – von jemand anderem geteilt
+ *
+ * Berechtigungen: "Files.ReadWrite" für das eigene OneDrive; "Files.ReadWrite.All" wird nur
+ * abgefragt, wenn ein geteilter Ordner genutzt wird. Siehe docs/SICHERHEIT.md.
+ *
+ * Reiner Dienst: keine Oberfläche, kein App-Zustand. Fehler werden als Error bzw. AuthNeeded geworfen.
+ */
+import { APP } from "../core/config.js";
+import { withSuffix } from "../documents/naming.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 let pca = null;
@@ -227,14 +238,19 @@ export async function ensureStructure(structure, onProgress) {
   }
 }
 
-// Lädt ein PDF hoch. Existiert der Name schon, wird "-2", "-3" … angehängt.
-export async function uploadPdf(folderParts, fileName, bytes, description) {
-  await ensureFolder(folderParts);
+/**
+ * Lädt eine Datei in den Ordner rel (relativ zum Archiv) hoch.
+ * Existiert der Name schon, wird "-2", "-3" … angehängt. description landet in den
+ * OneDrive-Dateieigenschaften ("Abgelegt von …").
+ * @returns {{name: string, webUrl: string, id: string}}
+ */
+export async function uploadFile(rel, fileName, bytes, contentType = "application/pdf", description = "") {
+  await ensureFolder(rel);
   let name = fileName;
   for (let n = 2; n < 50; n++) {
-    const r = await gfetch(`${itemUrl([...folderParts, name])}/content?@microsoft.graph.conflictBehavior=fail`, {
+    const r = await gfetch(`${itemUrl([...rel, name])}/content?@microsoft.graph.conflictBehavior=fail`, {
       method: "PUT",
-      headers: { "Content-Type": "application/pdf" },
+      headers: { "Content-Type": contentType || "application/octet-stream" },
       body: bytes,
     });
     if (r.status === 409) {

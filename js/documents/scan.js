@@ -1,4 +1,9 @@
-// Bildverarbeitung: Laden, Eckenerkennung, Entzerrung, Kontrast, JPEG-Export.
+/**
+ * Bildverarbeitung für fotografierte Seiten (läuft komplett im Browser):
+ *   loadImage → detectCorners (Blattkanten) → warp (entzerren) → enhance (Kontrast) → canvasToJpeg
+ *
+ * Nutzt Canvas-APIs und ist daher nur im Browser lauffähig.
+ */
 
 const WORK_MAX = 2400; // maximale Kantenlänge des Arbeitsbildes
 const OUT_MAX = 2000; // maximale Kantenlänge der PDF-Seite
@@ -330,3 +335,31 @@ export function canvasToJpeg(canvas, quality = 0.78, maxEdge = null) {
 }
 
 export const AI_MAX_EDGE = AI_MAX;
+
+// ---------- Seiten (für Jobs der Art "scan") ----------
+
+/**
+ * Erzeugt eine Seite aus einem geladenen Bild.
+ * Werden keine Blattkanten erkannt, nimmt man bei Fotos von der Kamera einen kleinen Rand weg,
+ * bei vorhandenen Bildern (Galerie, E-Mail-Anhang) das ganze Bild.
+ */
+export function makePage(src, { camera = false } = {}) {
+  const r = detectCorners(src);
+  const corners = r.detected ? r.corners : defaultCorners(src.width, src.height, camera ? 0.04 : 0);
+  const page = { src, corners, mode: camera || r.detected ? "doc" : "color", detected: r.detected };
+  renderPage(page);
+  return page;
+}
+
+/** Berechnet das bearbeitete Seitenbild (page.out) und das Vorschaubild (page.thumb). */
+export function renderPage(page) {
+  const out = enhance(warp(page.src, page.corners), page.mode);
+  page.out = out;
+  const t = document.createElement("canvas");
+  const s = 360 / Math.max(out.width, out.height);
+  t.width = Math.round(out.width * s);
+  t.height = Math.round(out.height * s);
+  t.getContext("2d").drawImage(out, 0, 0, t.width, t.height);
+  page.thumb = t.toDataURL("image/jpeg", 0.7);
+  return page;
+}

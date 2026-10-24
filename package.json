@@ -1,0 +1,10 @@
+{
+  "name": "dokumentenmanager",
+  "private": true,
+  "description": "Post scannen und im OneDrive-Archiv ablegen (Web-App ohne Build-Schritt)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:e2e": "python3 tests/e2e/run.py"
+  }
+}

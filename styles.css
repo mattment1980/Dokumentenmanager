@@ -209,3 +209,43 @@ code.copy { display: block; background: var(--surface-2); padding: 10px; border-
   background: linear-gradient(to bottom, transparent, var(--bg) 14px);
 }
 .actionbar .preview { margin: 0 0 10px; box-shadow: var(--shadow); border: 1px solid var(--line); }
+
+/* ---------- Ab Version 2.0: E-Mail, Stapel, Hineinziehen ---------- */
+.pick { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.pick:first-of-type { border-top: 0; }
+.card > .pick:only-child, .card > .pick:first-child { border-top: 0; }
+.pick input { width: 22px; height: 22px; margin: 1px 0 0; accent-color: var(--accent); flex: none; }
+.pick .grow { flex: 1; min-width: 0; }
+.pick b { display: block; font-size: 15px; }
+.pick.off { opacity: 0.5; cursor: default; }
+.mailhead, .jobcard { display: flex; gap: 12px; align-items: center; }
+.jobcard { padding: 12px 14px; }
+.mailhead .ic, .jobcard .ic, .ic.big {
+  width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none;
+  background: var(--accent-soft); color: var(--accent);
+}
+.mailhead .ic svg, .jobcard .ic svg { width: 22px; height: 22px; }
+.mailhead .grow, .jobcard .grow { flex: 1; min-width: 0; }
+.ic.big { width: 64px; height: 64px; border-radius: 20px; }
+.ic.big svg { width: 32px; height: 32px; }
+.ic.big.ok { background: var(--ok-soft); color: var(--ok); }
+.hint-desktop, .hint-mobile { margin: 10px 2px 18px; }
+.hint-desktop { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .hint-desktop { display: block; }
+  .hint-mobile { display: none; }
+}
+.drop-hint {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 24px;
+  background: rgba(31, 78, 95, 0.18); pointer-events: none;
+}
+.drop-hint .box {
+  border: 3px dashed var(--accent); background: var(--surface); border-radius: 20px; padding: 36px 28px;
+  display: flex; flex-direction: column; gap: 6px; text-align: center; max-width: 420px; box-shadow: var(--shadow);
+}
+.drop-hint b { font-size: 20px; }
+.drop-hint span { color: var(--ink-2); font-size: 14px; }
+@media (min-width: 900px) {
+  .app { max-width: 720px; }
+  .hero { min-height: 128px; }
+}

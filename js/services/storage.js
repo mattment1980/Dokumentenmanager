@@ -1,4 +1,12 @@
-// Lokale Speicherung auf dem Gerät: Einstellungen (localStorage) und Warteschlange (IndexedDB).
+/**
+ * Lokale Speicherung auf diesem Gerät (nichts davon verlässt das Gerät).
+ *
+ *   settings – kleine Einstellungen im localStorage (API-Schlüssel, Archivwahl, Kopie der Struktur …)
+ *   queue    – Upload-Warteschlange in IndexedDB (fertige Dateien, die noch nach OneDrive müssen)
+ *   history  – die letzten 30 abgelegten Dokumente (nur Name, Pfad, Link) für die Startseite
+ *
+ * Reiner Dienst ohne Oberfläche und ohne App-Zustand.
+ */
 
 const PREFIX = "dm.";
 

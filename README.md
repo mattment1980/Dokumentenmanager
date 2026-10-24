@@ -1,17 +1,26 @@
 # Dokumentenmanager
 
-Private Web-App zum Scannen von Post und Ablegen im OneDrive-Archiv (`OneDrive/11_Dokumentenarchiv`).
-Optimiert für Chrome auf Android.
+Private Web-App zum Ablegen von Post und E-Mail-Anhängen im OneDrive-Archiv (`OneDrive/11_Dokumentenarchiv`).
+Optimiert für Chrome auf Android, nutzbar auch am Desktop.
 
 **Adresse:** https://mattment1980.github.io/Dokumentenmanager/
 
-## Ablauf
+## Was die App kann
 
-1. Seiten fotografieren (eine oder mehrere), Ecken werden automatisch erkannt und lassen sich korrigieren
-2. Die App erstellt das PDF lokal auf dem Handy
-3. **KI-Vorschlag** (Ordner, Typ, Absender, Titel, Briefdatum) oder **Direkt ablegen** (ohne KI)
-4. Auf einem Bildschirm prüfen und bestätigen
-5. Ablage in OneDrive als `JJJJ-MM-TT_Absender_Dokumenttyp_Titel.pdf`
+**Briefe scannen:** Seiten fotografieren → Ecken werden erkannt (korrigierbar) → PDF entsteht auf dem Gerät.
+
+**E-Mails ablegen**
+- *Handy:* Anhang in Gmail/Outlook öffnen → **Teilen → „Dokumente“**
+- *Desktop:* Anhang oder **ganze E-Mail** aus Outlook ins App-Fenster ziehen
+  (bei GMX: Mail als .eml speichern und hineinziehen oder über „Datei oder E-Mail auswählen“)
+- Mehrere Anhänge werden einzeln geprüft und abgelegt; der **Mailtext** wird als letzte Seite angehängt
+  (pro Dokument abschaltbar). Mails ohne Anhang werden selbst zum Dokument.
+- Word/Excel-Anhänge werden im Original abgelegt.
+
+**Ablegen**
+1. **KI-Vorschlag** (Ordner, Typ, Absender, Titel, Briefdatum) oder **Direkt ablegen** (ohne KI)
+2. Auf einem Bildschirm prüfen und bestätigen
+3. Ablage in OneDrive als `JJJJ-MM-TT_Absender_Dokumenttyp_Titel.pdf`
 
 Ohne Internet wartet das Dokument auf dem Gerät und wird hochgeladen, sobald die App wieder online geöffnet ist.
 
@@ -37,8 +46,9 @@ Nach 1–2 Minuten ist die App unter der Adresse oben erreichbar.
 Unter https://console.anthropic.com einen API-Schlüssel erstellen und Ausgabenlimit setzen.
 In der App unter **Einstellungen → KI** eintragen und „Testen“ tippen. Der Schlüssel bleibt nur auf dem Gerät.
 
-### 4. Auf dem Handy installieren
-Adresse in Chrome öffnen → Menü (⋮) → **App installieren** bzw. **Zum Startbildschirm hinzufügen**.
+### 4. Installieren
+- **Handy:** Adresse in Chrome öffnen → Menü (⋮) → **App installieren**. Erst danach erscheint „Dokumente“ im Teilen-Menü.
+- **Desktop (optional):** In Chrome/Edge das Installieren-Symbol in der Adressleiste. Dann gibt es „Öffnen mit → Dokumentenmanager“ für PDFs und Mails.
 
 ## Gemeinsame Nutzung (weitere Personen)
 
@@ -61,8 +71,19 @@ umbenannte oder gelöschte Ordner bleiben in OneDrive bestehen und werden dort v
 
 - Dokumente gehen nur an OneDrive und, nur im KI-Weg, zur Auswertung an Anthropic.
 - API-Schlüssel und Anmeldung werden nur lokal im Browser gespeichert. Im Code stehen keine Geheimnisse.
-- Einzige Fremdbibliothek: die offizielle Microsoft-Anmeldebibliothek (MSAL, im Ordner `vendor/`).
+- Fremdbibliotheken liegen fest im Ordner `vendor/` (MSAL, pdf-lib, postal-mime, msgreader), nichts wird von fremden Servern geladen.
+- Die App hat keinen Zugriff auf E-Mail-Postfächer; Mails kommen nur durch Teilen, Hineinziehen oder Auswählen hinein.
 
-## Technik
+## Für Entwickler
 
-Reines HTML/CSS/JavaScript ohne Build-Schritt. `js/config.js` enthält die Standardstruktur und optional die feste Client-ID.
+Reines HTML/CSS/JavaScript ohne Build-Schritt.
+
+- Aufbau, Datenfluss und „wo gehört was hin“: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)
+- Sicherheitsmodell und Regeln für Erweiterungen: [docs/SICHERHEIT.md](docs/SICHERHEIT.md)
+- Änderungen: [CHANGELOG.md](CHANGELOG.md) · Fremdbibliotheken: [tools/vendor/README.md](tools/vendor/README.md)
+
+**Tests**
+```bash
+npm test                     # Unit-Tests (Node 20+), ohne Abhängigkeiten
+python3 tests/e2e/run.py     # Browsertest mit nachgebildetem OneDrive und KI (Playwright + Chromium)
+```

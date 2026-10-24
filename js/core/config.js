@@ -1,9 +1,14 @@
-// Grundeinstellungen der App.
-// CLIENT_ID: die "Anwendungs-ID (Client-ID)" aus der Microsoft-App-Registrierung.
-// Sie ist nicht geheim. Bleibt sie leer, kann sie in der App unter Einstellungen eingetragen werden.
+/**
+ * Grundeinstellungen der App (öffentlich einsehbar – hier keine Geheimnisse oder persönlichen Daten!).
+ *
+ * version     – bei jeder Änderung erhöhen; muss zu CACHE in sw.js passen (Test prüft das)
+ * CLIENT_ID   – "Anwendungs-ID (Client-ID)" der Microsoft-App-Registrierung (nicht geheim).
+ *               Bleibt sie leer, kann sie in der App eingetragen werden.
+ * DEFAULT_STRUCTURE – neutrale Vorlage; die echte Struktur liegt nur in OneDrive.
+ */
 export const APP = {
   name: "Dokumentenmanager",
-  version: "1.2.1",
+  version: "2.0.0",
   CLIENT_ID: "092c210e-11a4-40b9-bea0-68f165ee0b73",
   // Exakt so in Entra als Umleitungs-URI (Typ Single-Page-Anwendung) eingetragen.
   // Wird verwendet, wenn die App unter dieser Domain läuft (unabhängig von Groß-/Kleinschreibung im Pfad).

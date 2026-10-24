@@ -1,0 +1,4 @@
+tests/fixtures/local/
+node_modules/
+__pycache__/
+tests/e2e/screens/
