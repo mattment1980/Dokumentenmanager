@@ -68,7 +68,13 @@ export function normalizeStructure(edit) {
         .filter((c) => c.name),
     })),
     doctypes: edit.doctypes
-      .map((d) => ({ name: String(d.name || "").trim(), short: String(d.short || d.name || "").trim(), hint: String(d.hint || "").trim() }))
+      .map((d) => ({
+        name: String(d.name || "").trim(),
+        short: String(d.short || d.name || "").trim(),
+        hint: String(d.hint || "").trim(),
+        // Zusatzmerkmale von Funktionsmodulen erhalten (z. B. payable für das Rechnungsmodul)
+        ...(typeof d.payable === "boolean" ? { payable: d.payable } : {}),
+      }))
       .filter((d) => d.name),
   };
 }

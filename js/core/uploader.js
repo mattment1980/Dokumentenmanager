@@ -3,8 +3,11 @@
  * nach OneDrive hochgeladen. So geht ohne Netz nichts verloren.
  *
  * Eintrag in der Warteschlange:
- *   { id, created, rel: ["06_Steuern","Gemeinsam"], archive, fileName, bytes, mime, description }
- * (archive = Ziel zum Zeitpunkt des Ablegens; ein späterer Archivwechsel ändert das Ziel nicht)
+ *   { id, created, rel: ["06_Steuern","Gemeinsam"], archive, fileName, bytes, mime, description, meta }
+ * (archive = Ziel zum Zeitpunkt des Ablegens; ein späterer Archivwechsel ändert das Ziel nicht;
+ *  meta = Zusatzdaten von Erweiterungen, siehe core/pipeline.js planSave)
+ *
+ * Nach jedem erfolgreichen Upload: Ereignis "queue:uploaded" mit { item (ohne bytes), result }.
  */
 import { S } from "./state.js";
 import { queue, history } from "../services/storage.js";
@@ -41,6 +44,8 @@ export async function processQueue() {
         await queue.remove(it.id);
         done.set(it.id, res);
         S.authProblem = false;
+        const { bytes, ...info } = it;
+        emit("queue:uploaded", { item: { ...info, rel, archive: target }, result: res });
       } catch (e) {
         if (e instanceof od.AuthNeeded) {
           S.authProblem = true;

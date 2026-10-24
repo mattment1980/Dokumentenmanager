@@ -8,7 +8,7 @@
  */
 export const APP = {
   name: "Dokumentenmanager",
-  version: "2.0.0",
+  version: "2.1.0",
   CLIENT_ID: "092c210e-11a4-40b9-bea0-68f165ee0b73",
   // Exakt so in Entra als Umleitungs-URI (Typ Single-Page-Anwendung) eingetragen.
   // Wird verwendet, wenn die App unter dieser Domain läuft (unabhängig von Groß-/Kleinschreibung im Pfad).
@@ -126,8 +126,8 @@ export const DEFAULT_STRUCTURE = {
     },
   ],
   doctypes: [
-    { name: "Rechnung", short: "Rechnung", hint: "Zahlungsaufforderung für Ware oder Leistung" },
-    { name: "Mahnung", short: "Mahnung", hint: "Zahlungserinnerung oder Mahnung" },
+    { name: "Rechnung", short: "Rechnung", hint: "Zahlungsaufforderung für Ware oder Leistung", payable: true },
+    { name: "Mahnung", short: "Mahnung", hint: "Zahlungserinnerung oder Mahnung", payable: true },
     { name: "Abrechnung", short: "Abrechnung", hint: "Nebenkosten, Gehalt, Beiträge, Kontoauszug, Erstattung" },
     { name: "Vertrag", short: "Vertrag", hint: "Vertrag, Vertragsänderung, Kündigung, Kündigungsbestätigung" },
     { name: "Bescheid", short: "Bescheid", hint: "Behördliche Entscheidung (Steuer, Beitrag, Rente)" },

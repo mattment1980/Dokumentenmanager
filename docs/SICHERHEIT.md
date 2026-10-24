@@ -46,6 +46,18 @@ jemand sie aktiv teilt, hineinzieht oder auswählt.
 - **Geteilte Dateien (Android)** landen nur im lokalen Zwischenspeicher des Geräts und werden nach dem
   Übernehmen gelöscht.
 
+## Zahlungsdaten (Rechnungsmodul)
+
+- Die App **überweist nie selbst** und hat keinen Zugang zu Bankkonten. Sie zeigt nur Daten zum Abtippen/Kopieren.
+- IBAN, Betrag, Empfänger und Verwendungszweck offener Rechnungen liegen in `_Offene-Rechnungen.json` im
+  Archivordner – also dort, wo die Rechnungen selbst liegen, mit denselben Zugriffsrechten.
+- **IBAN-Prüfziffer**: Lese- und Tippfehler der KI werden erkannt, eine ungültige IBAN blockiert das Ablegen als „offen“.
+- **Betrugsschutz**: Für jeden Empfänger merkt sich die App die bisher genutzten IBANs. Taucht eine neue auf,
+  erscheint eine deutliche Warnung (beim Ablegen und in der Liste). Gefälschte Rechnungen mit geänderter
+  Bankverbindung sind eine verbreitete Masche.
+- Gleichzeitige Änderungen zweier Geräte an der Liste werden über die Versionskennung von OneDrive erkannt
+  (kein stilles Überschreiben).
+
 ## Regeln für Erweiterungen
 
 - Keine Schlüssel, Passwörter oder persönlichen Daten in den Code oder in Testdateien.

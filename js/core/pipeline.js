@@ -8,7 +8,8 @@
  * Ein Job hat dabei einen Entwurf (job.draft) mit den Ablagedaten:
  *   { date, doctype, folder, subfolder, sender, title, ai, aiPending, aiError, dateFromAi }
  *
- * Erweiterungen hängen sich über Ereignisse an (core/events.js), z. B. "document:saved".
+ * Erweiterungen hängen sich über Ereignisse (core/events.js, z. B. "document:saved") und
+ * Erweiterungspunkte (core/extensions.js: KI-Felder, Prüfen-Abschnitte, Ablage-Filter) an.
  */
 import { APP } from "./config.js";
 import { S, clone, folderByName, doctypeByName, uploaderName } from "./state.js";
@@ -17,6 +18,7 @@ import { busy, unbusy, toast, errText } from "./ui.js";
 import { archiveLabel } from "./archive.js";
 import { enqueue, processQueue } from "./uploader.js";
 import { emit } from "./events.js";
+import { getAiFields, getReviewSections, applySaveFilters, applyDraftInits } from "./extensions.js";
 import { settings, queue } from "../services/storage.js";
 import * as ai from "../services/ai.js";
 import { aiInput, buildFinal, defaultDate, describe, AI_PDF_LIMIT } from "../documents/job.js";
@@ -78,7 +80,7 @@ export function hasApiKey() {
 }
 
 function newDraft(job) {
-  return {
+  const d = {
     date: defaultDate(job) || todayIso(),
     doctype: "",
     folder: "",
@@ -90,6 +92,7 @@ function newDraft(job) {
     aiError: "",
     dateFromAi: false,
   };
+  return applyDraftInits(d, job);
 }
 
 export function startDirect() {
@@ -119,6 +122,7 @@ async function runAi(job) {
       model: settings.get("model", APP.defaultModel),
       structure: S.structure,
       ...input,
+      extraFields: getAiFields().map(({ name, schema, rule }) => ({ name, schema, rule })),
       today: todayIso(),
     });
     if (job.draft !== d) return;
@@ -132,6 +136,13 @@ async function runAi(job) {
       date: sug.date || d.date,
       dateFromAi: !!sug.date,
     });
+    for (const f of getAiFields()) {
+      try {
+        f.apply(d, sug.raw?.[f.name], job);
+      } catch (e) {
+        console.warn(`KI-Feld ${f.name}`, e);
+      }
+    }
   } catch (e) {
     if (job.draft !== d) return;
     d.aiError = errText(e);
@@ -154,13 +165,37 @@ export function validate(d) {
   return "";
 }
 
+/** Prüft Grunddaten und alle Zusatzabschnitte der Erweiterungen. */
+export function validateAll(job, d) {
+  return validate(d) || getReviewSections(job, d).map((sec) => sec.validate?.(job, d) || "").find(Boolean) || "";
+}
+
 export function fileNameFor(job, d) {
   const dt = doctypeByName(d.doctype);
   return buildFileName({ date: d.date, sender: d.sender, doctypeShort: dt ? dt.short : "", title: d.title, ext: job.ext });
 }
 
-export function targetPath(d) {
-  return [archiveLabel(), d.folder || "…", d.subfolder].filter(Boolean).join(" / ");
+/**
+ * Ablageplan: wohin, unter welchem Namen, mit welchem Vermerk.
+ * Erweiterungen können ihn über Ablage-Filter ändern (z. B. unbezahlte Rechnungen in einen Eingangsordner).
+ * meta wird mit dem Upload gespeichert und nach erfolgreichem Hochladen im Ereignis "queue:uploaded" mitgegeben.
+ */
+export function planSave(job, d) {
+  const who = uploaderName();
+  return applySaveFilters({
+    job,
+    draft: d,
+    who,
+    rel: [d.folder, d.subfolder].filter(Boolean),
+    fileName: fileNameFor(job, d),
+    description: `Abgelegt von: ${who} am ${new Date().toLocaleDateString("de-DE")} · Dokumenttyp: ${d.doctype} · Absender: ${String(d.sender || "").trim()}`,
+    meta: {},
+  });
+}
+
+export function targetPath(job, d) {
+  const rel = d.folder ? planSave(job, d).rel : ["…"];
+  return [archiveLabel(), ...rel].join(" / ");
 }
 
 // ---------- Ablegen ----------
@@ -169,11 +204,9 @@ export function targetPath(d) {
 export async function saveCurrent() {
   const job = S.job;
   const d = job.draft;
-  if (validate(d)) return;
-  const fileName = fileNameFor(job, d);
-  const rel = [d.folder, d.subfolder].filter(Boolean);
-  const who = uploaderName();
-  const description = `Abgelegt von: ${who} am ${new Date().toLocaleDateString("de-DE")} · Dokumenttyp: ${d.doctype} · Absender: ${d.sender.trim()}`;
+  if (validateAll(job, d)) return;
+  const plan = planSave(job, d);
+  const { rel, fileName, description, who } = plan;
   busy("Wird abgelegt …");
   try {
     const out = await buildFinal(job, {
@@ -183,7 +216,7 @@ export async function saveCurrent() {
       keywords: [d.doctype, d.folder, d.subfolder, d.sender].filter(Boolean).join(", "),
     });
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await enqueue({ id, created: Date.now(), rel, archive: clone(S.archive), fileName, bytes: out.bytes, mime: out.mime, description });
+    await enqueue({ id, created: Date.now(), rel, archive: clone(S.archive), fileName, bytes: out.bytes, mime: out.mime, description, meta: clone(plan.meta) });
     const done = navigator.onLine ? await processQueue() : new Map();
     const res = done.get(id);
     const queued = !res && (await queue.all()).some((q) => q.id === id);

@@ -17,6 +17,13 @@ Optimiert für Chrome auf Android, nutzbar auch am Desktop.
   (pro Dokument abschaltbar). Mails ohne Anhang werden selbst zum Dokument.
 - Word/Excel-Anhänge werden im Original abgelegt.
 
+**Rechnungen**
+- Bei Rechnungen und Mahnungen: „Bezahlt?“ → *Bezahlt* / *Wird abgebucht* (Ablage mit Vermerk) oder
+  *Offen* (Ablage in `00_Eingang/Unbezahlte Rechnungen` und in die Liste)
+- Liste **Offene Rechnungen** mit Empfänger, IBAN, Betrag, Verwendungszweck, Fälligkeit und Kopieren-Knöpfen
+- **Überwiesen** verschiebt die Rechnung mit dem Vermerk „bezahlt“ in ihren Ordner
+- IBAN-Prüfung und Warnung bei geänderter Bankverbindung eines Empfängers
+
 **Ablegen**
 1. **KI-Vorschlag** (Ordner, Typ, Absender, Titel, Briefdatum) oder **Direkt ablegen** (ohne KI)
 2. Auf einem Bildschirm prüfen und bestätigen

@@ -31,6 +31,9 @@ SUGGESTIONS = [
     {"folder": "06_Steuern", "subfolder": "Gemeinsam", "doctype": "Bescheid", "sender": "Finanzamt", "title": "Einkommensteuer 2025", "letter_date": "2026-10-14", "confidence": 0.93, "reason": "Steuerbescheid."},
     {"folder": "11_Verträge & Abos", "subfolder": "Sonstige", "doctype": "Abrechnung", "sender": "Stadtwerke", "title": "Jahresabrechnung Strom 2025", "letter_date": "", "confidence": 0.8, "reason": "Stromabrechnung laut E-Mail."},
 ]
+# Für den Rechnungstest (Abschnitt 11) wird SUGGESTIONS umgestellt
+INVOICE = {"folder": "13_Anschaffungen & Garantien", "subfolder": "", "doctype": "Rechnung", "sender": "Elektro Muster", "title": "Waschmaschine", "letter_date": "2026-10-20", "confidence": 0.9, "reason": "Rechnung für ein Gerät.",
+           "zahlung": {"empfaenger": "Elektro Muster GmbH", "iban": "DE89 3704 0044 0532 0130 00", "betrag": 649.9, "verwendungszweck": "RE-2026-4711", "faellig_am": "2026-11-03", "lastschrift": False}}
 
 def anthropic(route):
     body = json.loads(route.request.post_data)
@@ -39,11 +42,12 @@ def anthropic(route):
         return route.fulfill(status=400, headers={"access-control-allow-origin": "*"}, body='{"error":{"message":"tool_choice not supported"}}')
     if body.get("max_tokens") == 1:
         return route.fulfill(status=200, headers={"access-control-allow-origin": "*", "content-type": "application/json"}, body='{"content":[]}')
-    sug = SUGGESTIONS[min(len([c for c in ai_calls if c.get("max_tokens") != 1]) - 1, len(SUGGESTIONS) - 1)]
+    sug = INVOICE if USE_INVOICE[0] else SUGGESTIONS[min(len([c for c in ai_calls if c.get("max_tokens") != 1]) - 1, len(SUGGESTIONS) - 1)]
     route.fulfill(status=200, headers={"access-control-allow-origin": "*", "content-type": "application/json"},
                   body=json.dumps({"content": [{"type": "tool_use", "name": "ablage_vorschlag", "input": sug}]}))
 
 errors, checks = [], []
+USE_INVOICE = [False]
 
 def check(name, cond, info=""):
     checks.append((name, bool(cond)))
@@ -108,6 +112,7 @@ with sync_playwright() as p:
     pg.click("#direct"); pg.wait_for_selector("#save")
     pg.click("#dt [data-v='Rechnung']"); pg.click("#fo [data-v='05_Gesundheit']"); pg.click("#sf [data-v='Person 2']")
     pg.fill("#sender", "Dr. Huber"); pg.fill("#title", "Vorsorge")
+    pg.click("#payStatus [data-s=paid]")
     pg.click("#save"); pg.wait_for_selector("#again")
     check("Direkt abgelegt", uploads(pg)[-1]["rel"] == "05_Gesundheit/Person 2")
 
@@ -201,11 +206,72 @@ with sync_playwright() as p:
     pg.set_input_files("#fileInput", os.path.join(FX, "rechnung-mit-anhang.eml")); pg.wait_for_selector("#direct", timeout=15000)
     pg.click("#direct"); pg.wait_for_selector("#save")
     pg.click("#dt [data-v='Rechnung']"); pg.click("#fo [data-v='00_Eingang']"); pg.fill("#sender", "X"); pg.fill("#title", "Y")
+    pg.click("#payStatus [data-s=debit]")
     pg.click("#save"); pg.wait_for_selector("#again")
     check("Ablage im geteilten Ordner", uploads(pg)[-1]["archive"] == "11_Dokumentenarchiv@shared")
 
+    print("11) Rechnungen: offen ablegen, Liste, IBAN-Warnung, Überwiesen")
+    # zurück ins eigene OneDrive
+    pg.click("[data-act=home]"); pg.click("[data-act=settings]"); pg.wait_for_selector("#amode")
+    pg.click("#amode [data-m=own]"); pg.wait_for_selector("#saveRoot", timeout=10000)
+    pg.click("[data-act=back]"); pg.wait_for_selector("#scan")
+    USE_INVOICE[0] = True
+    n_ai = len(ai_calls)
+    pg.set_input_files("#camInput", os.path.join(FX, "brief.jpg")); pg.wait_for_selector("#next", timeout=20000); pg.click("#next")
+    pg.click("#ai"); pg.wait_for_selector("#save", timeout=20000)
+    req = ai_calls[n_ai]
+    check("KI-Schema enthält Zahlungsfelder", "zahlung" in req["tools"][0]["input_schema"]["properties"])
+    check("Frage 'Bezahlt?' erscheint bei Rechnung", pg.is_visible("#payStatus"))
+    check("Ohne Antwort kein Ablegen", pg.is_disabled("#save"))
+    pg.click("#payStatus [data-s=paid]"); pg.wait_for_timeout(100)
+    check("Bezahlt: Dateiname mit _bezahlt im Zielordner", "_Waschmaschine_bezahlt.pdf" in pg.inner_text("#pv") and "13_Anschaffungen" in pg.inner_text("#pv"), pg.inner_text("#pv"))
+    pg.click("#payStatus [data-s=debit]"); pg.wait_for_timeout(100)
+    check("Lastschrift: Dateiname mit _Lastschrift", "_Lastschrift.pdf" in pg.inner_text("#pv"))
+    pg.click("#payStatus [data-s=open]"); pg.wait_for_selector("[data-p=iban]")
+    check("Offen: Ziel ist Eingang/Unbezahlte Rechnungen", "00_Eingang / Unbezahlte Rechnungen" in pg.inner_text("#pv"), pg.inner_text("#pv"))
+    check("KI-Werte vorbelegt (IBAN gültig, Betrag)", "✓ gültig" in pg.inner_text("#pay") and pg.input_value("[data-p=amount]") == "649,90")
+    pg.fill("[data-p=iban]", "DE89370400440532013001"); pg.dispatch_event("[data-p=iban]", "change"); pg.wait_for_timeout(100)
+    check("Falsche IBAN wird erkannt und blockiert", "Prüfziffer falsch" in pg.inner_text("#pay") and pg.is_disabled("#save"))
+    pg.fill("[data-p=iban]", "DE89 3704 0044 0532 0130 00"); pg.dispatch_event("[data-p=iban]", "change"); pg.wait_for_timeout(100)
+    pg.screenshot(path=f"{SHOTS}/10_review_invoice.png", full_page=True)
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000)
+    u = uploads(pg)[-1]
+    check("Upload nach 00_Eingang/Unbezahlte Rechnungen", u["rel"] == "00_Eingang/Unbezahlte Rechnungen", u["rel"])
+    check("Vermerk 'Offen, fällig am'", "Offen, fällig am 03.11.2026" in u["description"])
+    reg = pg.evaluate("JSON.parse(localStorage.getItem('__od')).files['own:_Offene-Rechnungen.json'].data")
+    e = reg["open"][0] if reg["open"] else {}
+    check("Register-Eintrag mit allen Zahlungsdaten", e.get("amount") == 649.9 and e.get("iban") == "DE89370400440532013000" and e.get("purpose") == "RE-2026-4711" and e.get("targetRel") == ["13_Anschaffungen & Garantien"], e)
+    check("IBAN für Empfänger gemerkt", reg["knownIbans"].get("elektro muster") == ["DE89370400440532013000"], reg["knownIbans"])
+    pg.click("[data-act=home]"); pg.wait_for_selector("#tileInvoices"); pg.wait_for_timeout(200)
+    check("Startseite: Kachel mit Summe", "649,90" in pg.inner_text("#tileInvoices") and "1 offen" in pg.inner_text("#tileInvoices"))
+    pg.screenshot(path=f"{SHOTS}/11_home_invoice.png")
+
+    # Zweite Rechnung desselben Empfängers mit anderer IBAN → Warnung
+    INVOICE["zahlung"]["iban"] = "GB82WEST12345698765432"; INVOICE["doctype"] = "Mahnung"; INVOICE["title"] = "Mahnung Waschmaschine"
+    pg.set_input_files("#camInput", os.path.join(FX, "brief.jpg")); pg.wait_for_selector("#next", timeout=20000); pg.click("#next")
+    pg.click("#ai"); pg.wait_for_selector("#save", timeout=20000)
+    pg.click("#payStatus [data-s=open]"); pg.wait_for_selector("[data-p=iban]")
+    txt = pg.inner_text("#pay")
+    check("Warnung bei neuer IBAN", "neue IBAN für diesen Empfänger" in txt)
+    check("Mahnung: Hinweis auf offene Rechnung", "bereits eine Rechnung" in txt)
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000)
+
+    pg.click("[data-act=home]"); pg.wait_for_selector("#tileInvoices"); pg.click("#tileInvoices")
+    pg.wait_for_selector(".inv", timeout=10000); pg.wait_for_timeout(300)
+    check("Liste zeigt 2 offene, Summe", pg.locator(".inv").count() == 2 and "2 offen" in pg.inner_text(".topbar"))
+    check("Warnhinweis in der Liste", "Neue IBAN für diesen Empfänger" in pg.inner_text("#app"))
+    pg.screenshot(path=f"{SHOTS}/12_invoices.png", full_page=True)
+    first = pg.locator("[data-paid]").first
+    first.click(); pg.wait_for_timeout(600)
+    mv = pg.evaluate("JSON.parse(localStorage.getItem('__od')).moves")
+    check("Überwiesen: verschoben in Zielordner mit _bezahlt", mv and mv[-1]["targetRel"] == "13_Anschaffungen & Garantien" and mv[-1]["newName"].endswith("_bezahlt.pdf") and "Bezahlt am" in mv[-1]["description"], mv)
+    reg = pg.evaluate("JSON.parse(localStorage.getItem('__od')).files['own:_Offene-Rechnungen.json'].data")
+    check("Register danach mit 1 Eintrag", len(reg["open"]) == 1)
+    check("Liste aktualisiert", pg.locator(".inv").count() == 1)
+    USE_INVOICE[0] = False
+
     # Desktop-Ansicht der Startseite
-    pg.set_viewport_size({"width": 1280, "height": 800}); pg.click("[data-act=home]"); pg.wait_for_timeout(300)
+    pg.set_viewport_size({"width": 1280, "height": 800}); pg.click("[data-act=back]"); pg.wait_for_selector("#scan"); pg.wait_for_timeout(300)
     pg.screenshot(path=f"{SHOTS}/09_home_desktop.png")
     ctx.close()
 

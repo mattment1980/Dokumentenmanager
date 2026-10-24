@@ -7,7 +7,8 @@ import { S, folderByName } from "../core/state.js";
 import { registerScreen, resetTo, render } from "../core/router.js";
 import { app, $, esc, topbar } from "../core/ui.js";
 import { I } from "../core/icons.js";
-import { batchInfo, validate, fileNameFor, targetPath, saveCurrent, skipCurrent, abortAi } from "../core/pipeline.js";
+import { batchInfo, validateAll, planSave, targetPath, saveCurrent, skipCurrent, abortAi } from "../core/pipeline.js";
+import { getReviewSections } from "../core/extensions.js";
 import { canAppendMail } from "../documents/job.js";
 import { jobCard } from "./parts.js";
 
@@ -69,6 +70,7 @@ const screen = {
         <label class="field" style="margin-bottom:0"><span>Titel (Inhalt)</span><input type="text" id="title" value="${esc(d.title)}" placeholder="z. B. Einkommensteuer 2025" autocomplete="off"></label>
       </div>
 
+      <div id="ext">${getReviewSections(job, d).map((sec) => `<div data-sec="${esc(sec.id)}">${sec.render(job, d)}</div>`).join("")}</div>
       ${mailToggle ? `<div class="card">${mailToggle}</div>` : ""}
       ${b.total > 1 ? `<button class="btn block" id="skip">${I.skip} Dieses Dokument überspringen</button><div style="height:4px"></div>` : ""}
 
@@ -108,6 +110,11 @@ const screen = {
       });
     }
     $("#appendMail") && ($("#appendMail").onchange = (e) => (job.appendMail = e.target.checked));
+    // Zusatzabschnitte von Funktionsmodulen (z. B. Rechnungen) anbinden
+    for (const sec of getReviewSections(job, d)) {
+      const root = $(`[data-sec="${sec.id}"]`);
+      if (root && sec.bind) sec.bind(root, job, d, () => this.render(), () => this.preview());
+    }
     $("#skip") && ($("#skip").onclick = () => skipCurrent());
     $("#save").onclick = () => saveCurrent();
     this.preview();
@@ -116,8 +123,8 @@ const screen = {
   preview() {
     const job = S.job;
     const d = job.draft;
-    const v = validate(d);
-    $("#pv").innerHTML = `${esc(fileNameFor(job, d))}<div class="path">${esc(targetPath(d))}</div>${v ? `<div class="path" style="color:var(--warn)">${esc(v)}</div>` : ""}`;
+    const v = validateAll(job, d);
+    $("#pv").innerHTML = `${esc(planSave(job, d).fileName)}<div class="path">${esc(targetPath(job, d))}</div>${v ? `<div class="path" style="color:var(--warn)">${esc(v)}</div>` : ""}`;
     $("#save").disabled = !!v;
   },
 };

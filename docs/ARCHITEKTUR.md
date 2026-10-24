@@ -21,6 +21,7 @@ js/
     router.js           Bildschirm-Navigation, Zurück-Taste
     ui.js / icons.js    Helfer (esc, toast, busy, topbar …) und Symbole
     events.js           Ereignis-Bus für Erweiterungen
+    extensions.js       Erweiterungspunkte für Funktionsmodule (siehe unten)
     archive.js          aktiver Archivordner (eigen / geteilt)
     structure.js        Ordnerstruktur laden, prüfen, speichern
     uploader.js         Upload-Warteschlange (offline-fest)
@@ -39,6 +40,11 @@ js/
     index.js            zentrale Annahme: Dateien → Jobs
     mail.js             .eml und .msg einlesen
     sources.js          Kamera, Dateiauswahl, Hineinziehen, Teilen, „Öffnen mit“
+  features/           Funktionsmodule, die nur über Erweiterungspunkte andocken
+    invoices/           Rechnungen: Bezahlt-Frage, offene Liste, „Überwiesen“
+      index.js            Anmeldung an den Erweiterungspunkten, Aktionen (markPaid …)
+      register.js         gemeinsame Liste in OneDrive (_Offene-Rechnungen.json), konfliktsicher
+      payment.js          IBAN-Prüfung, Beträge, Fälligkeit (reine Funktionen)
   screens/            je Bildschirm eine Datei (registerScreen)
 
 vendor/               fremde Bibliotheken, fest im Repository (siehe tools/vendor/README.md)
@@ -49,7 +55,8 @@ docs/                 diese Dokumentation
 **Regeln für Abhängigkeiten** (von oben nach unten erlaubt, nie umgekehrt):
 
 ```
-screens/  →  core/  →  services/, documents/
+screens/   →  core/, features/  →  services/, documents/
+features/  →  core/, services/, documents/   (nie umgekehrt: der Kern kennt keine Funktionsmodule)
 importers/ →  core/, documents/
 services/, documents/  →  nur untereinander und core/config.js
 ```
@@ -92,13 +99,29 @@ geprüft und abgelegt; einzelne lassen sich überspringen.
 Ordnerstruktur und Dokumenttypen liegen als `_Dokumentenmanager-Konfiguration.json` im Archivordner in
 OneDrive. Das Gerät hält nur eine Kopie für den Offline-Betrieb. Im Code steht nur eine neutrale Vorlage.
 
+## Erweiterungspunkte (`core/extensions.js`)
+
+Funktionsmodule (`js/features/…`) melden sich hier an. Der Kern ruft sie an festen Stellen auf, ohne sie
+zu kennen. So bleibt jedes Modul in sich geschlossen und lässt sich ab- oder umbauen.
+
+| Punkt | Wann | Beispiel Rechnungen |
+|-------|------|---------------------|
+| `registerDraftInit(fn)` | neuer Entwurf | `draft.payment = {…}` anlegen |
+| `registerAiField({name, schema, rule, apply})` | KI-Anfrage / -Antwort | Feld `zahlung` (IBAN, Betrag …) |
+| `registerReviewSection({id, applies, render, bind, validate})` | Prüfen-Bildschirm | „Bezahlt?“ mit Zahlungsdaten |
+| `registerSaveFilter(fn(plan))` | vor dem Ablegen | Zielordner, `_bezahlt`, Vermerk, `plan.meta` |
+| `registerHomeSection({id, render, bind})` | Startseite | Kachel „Offene Rechnungen“ |
+
+`plan.meta` wird mit der Datei in die Warteschlange gelegt und nach dem erfolgreichen Upload im Ereignis
+`queue:uploaded` zurückgegeben – so funktioniert die Nachbearbeitung auch, wenn erst später hochgeladen wird.
+
 ## Erweitern – wo gehört was hin?
 
 | Vorhaben                                   | Ort |
 |--------------------------------------------|-----|
 | Neuer Eingangskanal (z. B. Postfach abrufen) | neue Quelle in `importers/sources.js` oder eigenes Modul in `importers/`, ruft `importFiles()` bzw. `startBatch()` auf |
 | Neues Dateiformat                          | `documents/filetypes.js` (+ ggf. Zweig in `importers/index.js`, Manifest pflegen) |
-| Etwas nach dem Ablegen tun (Fristen, Kalender) | eigenes Modul, das `on("document:saved", …)` abonniert – siehe unten |
+| Neue Funktion rund ums Ablegen (Fristen, Kalender …) | neues Modul in `features/<name>/`, nutzt Erweiterungspunkte und Ereignisse; in `js/app.js` importieren – Vorbild `features/invoices/` |
 | Neuer externer Dienst (z. B. Kalender-API)  | neues Modul in `services/` (ohne Oberfläche) |
 | Neuer Bildschirm                           | Datei in `screens/` mit `registerScreen()`, in `js/app.js` importieren, in `sw.js` (SHELL) eintragen |
 | Neues Feld im Prüfen-Bildschirm            | `job.draft` in `core/pipeline.js` (newDraft, validate) und `screens/review.js` |
@@ -108,8 +131,10 @@ OneDrive. Das Gerät hält nur eine Kopie für den Offline-Betrieb. Im Code steh
 | Ereignis          | Daten | Wann |
 |-------------------|-------|------|
 | `document:saved`  | `{ job, draft, result, archive, rel }` | nach dem Ablegen eines Dokuments (auch wenn es noch in der Warteschlange wartet) |
+| `queue:uploaded`  | `{ item, result }` | eine Datei ist tatsächlich in OneDrive (`item.meta` aus dem Ablageplan, `result.id`) |
 | `queue:changed`   | –     | Warteschlange verändert (Upload fertig, Fehler …) |
 | `config:loaded`   | Struktur | Ordnerstruktur geladen oder gespeichert |
+| `invoices:changed`| Register | Liste der offenen Rechnungen geändert |
 
 Beispiel für eine spätere Fristen-Erweiterung:
 

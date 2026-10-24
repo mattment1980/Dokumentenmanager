@@ -249,3 +249,29 @@ code.copy { display: block; background: var(--surface-2); padding: 10px; border-
   .app { max-width: 720px; }
   .hero { min-height: 128px; }
 }
+
+/* ---------- Ab Version 2.1: Rechnungen ---------- */
+.tile {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px;
+  box-shadow: var(--shadow); margin-bottom: 14px;
+}
+.tile .grow { flex: 1; min-width: 0; }
+.tile b { display: block; font-size: 16px; }
+.tile.warn { border-color: var(--err); }
+.tile.warn .path { color: var(--err); }
+.tile.quiet { box-shadow: none; }
+.amount { font-weight: 700; font-size: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inv.overdue { border-color: var(--err); }
+.invhead { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+.invhead .grow { flex: 1; min-width: 0; }
+.errtext { color: var(--err) !important; font-weight: 600; }
+.warntext { color: var(--warn) !important; font-weight: 600; }
+.paykv { grid-template-columns: 76px 1fr; align-items: center; column-gap: 8px; }
+.paykv dd { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; white-space: nowrap; }
+.copybtn { width: 36px; height: 36px; flex: none; }
+.copybtn svg { width: 18px; height: 18px; }
+.okmark { color: var(--ok); font-weight: 600; margin-left: 6px; }
+.errmark { color: var(--err); font-weight: 600; margin-left: 6px; }
+#pay .seg { margin-top: 2px; }

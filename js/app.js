@@ -13,6 +13,9 @@ import { settings } from "./services/storage.js";
 import * as od from "./services/onedrive.js";
 import { checkShareInbox, listenForLaunchFiles } from "./importers/sources.js";
 
+// Funktionsmodule (melden sich an den Erweiterungspunkten in core/extensions.js an)
+import "./features/invoices/index.js";
+
 // Bildschirme (melden sich selbst beim Router an)
 import "./screens/setup.js";
 import "./screens/login.js";
@@ -25,6 +28,7 @@ import "./screens/review.js";
 import "./screens/done.js";
 import "./screens/shared.js";
 import "./screens/settings.js";
+import "./screens/invoices.js";
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;

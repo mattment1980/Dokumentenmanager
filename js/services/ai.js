@@ -6,6 +6,8 @@
  *   pdf     – PDF als Uint8Array
  *   text    – Begleittext, z. B. die E-Mail zum Anhang (wird gekürzt)
  *   fileName – Originaldateiname als Hinweis
+ *   extraFields – zusätzliche Felder von Erweiterungen: [{ name, schema, rule }]
+ *                 (die Rohwerte stehen im Ergebnis unter raw[name])
  *
  * Sicherheit: Dokumente und E-Mails stammen oft von Fremden. Die KI darf nur einen Vorschlag
  * im festen Schema liefern; Anweisungen im Dokument werden laut Systemanweisung ignoriert, und
@@ -89,7 +91,7 @@ export function canSuggest({ images = [], pdf = null, text = "" }) {
   return !!(pdf || images.length || String(text || "").trim());
 }
 
-export async function suggest({ key, model, structure, images = [], pdf = null, text = "", fileName = "", today }) {
+export async function suggest({ key, model, structure, images = [], pdf = null, text = "", fileName = "", extraFields = [], today }) {
   const folders = structure.folders.map((f) => f.name);
   const doctypes = structure.doctypes.map((d) => d.name);
   const system = `Du sortierst eingehende private Post einer Familie in ein Dokumentenarchiv in OneDrive.
@@ -110,7 +112,7 @@ REGELN:
 - Kommt das Dokument mit einer E-Mail, ist der Anhang maßgeblich; die E-Mail dient als Zusatzinformation. Gibt es nur die E-Mail, ist sie selbst das Dokument.
 - letter_date: das Datum des Schreibens (Briefdatum, Ausstellungsdatum, Rechnungsdatum) im Format JJJJ-MM-TT. Ohne eigenes Datum im Dokument ist das Datum der E-Mail zu verwenden. Nicht das heutige Datum (${today}) erfinden; wenn kein Datum erkennbar ist, leer lassen.
 - confidence: 0 bis 1, wie sicher du beim Ordner bist.
-- reason: ein kurzer Satz auf Deutsch, warum dieser Ordner.`;
+- reason: ein kurzer Satz auf Deutsch, warum dieser Ordner.${extraFields.map((f) => `\n- ${f.name}: ${f.rule}`).join("")}`;
 
   const content = pdf
     ? [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: b64(pdf) } }]
@@ -148,6 +150,7 @@ REGELN:
         letter_date: { type: "string", description: "JJJJ-MM-TT oder leer" },
         confidence: { type: "number" },
         reason: { type: "string" },
+        ...Object.fromEntries(extraFields.map((f) => [f.name, f.schema])),
       },
       required: ["folder", "subfolder", "doctype", "sender", "title", "letter_date", "confidence", "reason"],
     },
@@ -216,5 +219,7 @@ export function normalize(s, structure) {
     date: /^\d{4}-\d{2}-\d{2}$/.test(s.letter_date || "") ? s.letter_date : "",
     confidence: typeof s.confidence === "number" ? s.confidence : null,
     reason: String(s.reason || "").trim(),
+    /** Rohantwort, u. a. für Zusatzfelder von Erweiterungen (ungeprüft – die Erweiterung prüft selbst) */
+    raw: s,
   };
 }

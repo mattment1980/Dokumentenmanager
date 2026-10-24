@@ -7,6 +7,7 @@ import { registerScreen, isCurrent, render, setStack } from "../core/router.js";
 import { app, $, esc, topbar } from "../core/ui.js";
 import { I } from "../core/icons.js";
 import { on } from "../core/events.js";
+import { getHomeSections } from "../core/extensions.js";
 import { processQueue } from "../core/uploader.js";
 import { cancelBatch } from "../core/pipeline.js";
 import { queue, history } from "../services/storage.js";
@@ -29,6 +30,7 @@ registerScreen("home", {
       <button class="btn block" id="pick">${I.file} Datei oder E-Mail auswählen</button>
       <p class="muted small hint-desktop">Tipp: Anhänge oder ganze E-Mails aus Outlook einfach in dieses Fenster ziehen.</p>
       <p class="muted small hint-mobile">Tipp: In Gmail oder Outlook einen Anhang öffnen → Teilen → „Dokumente“.</p>
+      <div id="homeExt">${getHomeSections().map((sec) => `<div data-home="${esc(sec.id)}">${sec.render()}</div>`).join("")}</div>
       <div class="card">
         <h2>Zuletzt abgelegt</h2>
         ${hist.length ? `<ul class="list">${hist.slice(0, 10).map((h) => `<li>
@@ -37,6 +39,10 @@ registerScreen("home", {
             ${h.webUrl ? `<a class="small" href="${esc(h.webUrl)}" target="_blank" rel="noopener">In OneDrive öffnen</a>` : ""}
           </li>`).join("")}</ul>` : `<p class="muted">Noch nichts abgelegt. Leg los mit „Dokument scannen“.</p>`}
       </div>`;
+    for (const sec of getHomeSections()) {
+      const root = $(`[data-home="${sec.id}"]`);
+      if (root && sec.bind) sec.bind(root);
+    }
     $("#scan").onclick = () => openCamera();
     $("#pick").onclick = () => openFilePicker();
     $("#retry") && ($("#retry").onclick = () => processQueue());
@@ -55,3 +61,4 @@ registerScreen("home", {
 // Startseite aktualisieren, wenn sich die Warteschlange ändert (z. B. Upload fertig)
 on("queue:changed", () => isCurrent("home") && render());
 on("config:loaded", () => isCurrent("home") && render());
+on("invoices:changed", () => isCurrent("home") && render());

@@ -1,5 +1,24 @@
 # Änderungen
 
+## 2.1.0 – Rechnungen
+
+**Neu**
+- Bei Rechnungen und Mahnungen fragt die App „Bezahlt?“ – *Bezahlt*, *Offen* oder *Wird abgebucht*
+  - Bezahlt: Ablage im Zielordner, Dateiname mit `_bezahlt`, Vermerk in den Eigenschaften
+  - Wird abgebucht: Ablage im Zielordner, Dateiname mit `_Lastschrift`
+  - Offen: Ablage in `00_Eingang/Unbezahlte Rechnungen` und Eintrag in die Liste
+- KI liest Empfänger, IBAN, Betrag, Verwendungszweck und Fälligkeit aus (auch „zahlbar in 14 Tagen“)
+- Liste „Offene Rechnungen“ (Kachel auf der Startseite): sortiert nach Fälligkeit, Summe, Überfälliges markiert,
+  Kopieren-Knöpfe; „Überwiesen“ verschiebt die Rechnung in ihren Ordner und benennt sie in `…_bezahlt` um
+- Gemeinsame Liste für alle Nutzer des Archivs (konfliktsicher)
+- IBAN-Prüfziffer und Warnung bei geänderter IBAN eines bekannten Empfängers
+- Mahnung: Hinweis, wenn beim selben Empfänger schon eine Rechnung offen ist
+
+**Intern**
+- Erweiterungspunkte für Funktionsmodule (`core/extensions.js`), erstes Modul `features/invoices/`
+- OneDrive-Dienst: Verschieben/Umbenennen, konfliktsicheres Schreiben, explizites Archiv je Aufruf
+- Ereignis `queue:uploaded` mit Zusatzdaten aus dem Ablageplan
+
 ## 2.0.0 – E-Mails ablegen, neue Code-Struktur
 
 **Neu**

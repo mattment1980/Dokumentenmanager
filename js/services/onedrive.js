@@ -161,20 +161,21 @@ async function graphError(res) {
 }
 
 const enc = (parts) => parts.filter(Boolean).map((p) => encodeURIComponent(p)).join("/");
-const rootParts = () => String(archive.path || "").split("/").filter(Boolean);
-// Alle Pfade in dieser Datei sind relativ zum Archivordner.
-function full(rel) {
-  return archive.mode === "shared" ? rel.filter(Boolean) : [...rootParts(), ...rel.filter(Boolean)];
+const rootParts = (a) => String(a.path || "").split("/").filter(Boolean);
+// Alle Pfade in dieser Datei sind relativ zum Archivordner. Standard ist das aktive Archiv;
+// einzelne Funktionen nehmen optional ein festes Archiv entgegen (opts.archive).
+function full(rel, a = archive) {
+  return a.mode === "shared" ? rel.filter(Boolean) : [...rootParts(a), ...rel.filter(Boolean)];
 }
-function baseUrl(parts) {
-  if (archive.mode === "shared") {
-    const b = `/drives/${encodeURIComponent(archive.driveId)}/items/${encodeURIComponent(archive.itemId)}`;
+function baseUrl(parts, a = archive) {
+  if (a.mode === "shared") {
+    const b = `/drives/${encodeURIComponent(a.driveId)}/items/${encodeURIComponent(a.itemId)}`;
     return parts.length ? `${b}:/${enc(parts)}:` : b;
   }
   return parts.length ? `/me/drive/root:/${enc(parts)}:` : "/me/drive/root";
 }
-const itemUrl = (rel) => baseUrl(full(rel));
-const archiveKey = () => (archive.mode === "shared" ? `s:${archive.driveId}:${archive.itemId}` : `o:${archive.path}`).toLowerCase();
+const itemUrl = (rel, a = archive) => baseUrl(full(rel, a), a);
+const archiveKey = (a = archive) => (a.mode === "shared" ? `s:${a.driveId}:${a.itemId}` : `o:${a.path}`).toLowerCase();
 
 export async function getMe() {
   const r = await gfetch("/me?$select=displayName,givenName");
@@ -182,38 +183,88 @@ export async function getMe() {
   return r.json();
 }
 
-export async function readJson(parts) {
-  const r = await gfetch(itemUrl(parts));
-  if (r.status === 404) return null;
+export async function readJson(parts, opts = {}) {
+  return (await readJsonMeta(parts, opts)).data;
+}
+
+/**
+ * Liest eine JSON-Datei samt Versionskennung (eTag) für konfliktsicheres Zurückschreiben.
+ * @returns {{ data: object|null, eTag: string|null }}  data = null, wenn die Datei fehlt
+ */
+export async function readJsonMeta(parts, { archive: a = archive } = {}) {
+  const r = await gfetch(itemUrl(parts, a));
+  if (r.status === 404) return { data: null, eTag: null };
   if (!r.ok) throw await graphError(r);
   const meta = await r.json();
   const url = meta["@microsoft.graph.downloadUrl"];
-  const d = url ? await fetch(url) : await gfetch(itemUrl(parts) + "/content");
-  if (!d.ok) throw new Error(`OneDrive: Konfiguration nicht lesbar (${d.status})`);
-  return d.json();
+  const d = url ? await fetch(url, { cache: "no-store" }) : await gfetch(itemUrl(parts, a) + "/content");
+  if (!d.ok) throw new Error(`OneDrive: Datei nicht lesbar (${d.status})`);
+  return { data: await d.json(), eTag: meta.eTag || null };
 }
 
-export async function writeJson(parts, obj) {
-  const r = await gfetch(`${itemUrl(parts)}/content?@microsoft.graph.conflictBehavior=replace`, {
+/** Wird geworfen, wenn eine Datei seit dem Lesen von jemand anderem geändert wurde. */
+export class Conflict extends Error {
+  constructor() {
+    super("Die Datei wurde zwischenzeitlich geändert.");
+    this.name = "Conflict";
+  }
+}
+
+/**
+ * Schreibt eine JSON-Datei. Mit ifMatch (eTag aus readJsonMeta) nur, wenn sie seitdem unverändert ist –
+ * sonst Conflict. ifMatch = null bei einer neuen Datei: dann nur, wenn sie noch nicht existiert.
+ */
+export async function writeJson(parts, obj, { ifMatch, archive: a = archive } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  let behavior = "replace";
+  if (ifMatch) headers["If-Match"] = ifMatch;
+  else if (ifMatch === null) behavior = "fail";
+  const r = await gfetch(`${itemUrl(parts, a)}/content?@microsoft.graph.conflictBehavior=${behavior}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(obj, null, 2),
   });
+  if (r.status === 412 || (behavior === "fail" && r.status === 409)) throw new Conflict();
   if (!r.ok) throw await graphError(r);
   return r.json();
 }
 
+/**
+ * Verschiebt und/oder benennt eine Datei um (per ID, unabhängig vom Archiv).
+ * targetRel ist relativ zum angegebenen Archiv; fehlende Ordner werden angelegt.
+ * Existiert der Name im Ziel schon, vergibt OneDrive einen neuen Namen.
+ * @returns {{ name, webUrl, id }}
+ */
+export async function moveItem({ driveId, id }, targetRel, newName, { description, archive: a = archive } = {}) {
+  await ensureFolder(targetRel, { archive: a });
+  const fr = await gfetch(itemUrl(targetRel, a));
+  if (!fr.ok) throw await graphError(fr);
+  const folder = await fr.json();
+  const body = { parentReference: { id: folder.id }, name: newName };
+  if (description) body.description = description;
+  const url = driveId ? `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(id)}` : `/me/drive/items/${encodeURIComponent(id)}`;
+  const r = await gfetch(`${url}?@microsoft.graph.conflictBehavior=rename`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 404) throw new Error("Die Datei wurde in OneDrive nicht gefunden (verschoben oder gelöscht?).");
+  if (!r.ok) throw await graphError(r);
+  const item = await r.json();
+  return { name: item.name, webUrl: item.webUrl, id: item.id };
+}
+
 const known = new Set();
 
-export async function ensureFolder(rel) {
-  const clean = full(rel);
+export async function ensureFolder(rel, { archive: a = archive } = {}) {
+  const clean = full(rel, a);
   // Im geteilten Modus existiert die Basis bereits; im eigenen Modus wird der Archivordner mit angelegt.
   for (let i = 0; i < clean.length; i++) {
     const path = clean.slice(0, i + 1);
-    const key = archiveKey() + "|" + path.join("/").toLowerCase();
+    const key = archiveKey(a) + "|" + path.join("/").toLowerCase();
     if (known.has(key)) continue;
     const parent = clean.slice(0, i);
-    const r = await gfetch(`${baseUrl(parent)}/children`, {
+    const r = await gfetch(`${baseUrl(parent, a)}/children`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: path[path.length - 1], folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
@@ -271,7 +322,7 @@ export async function uploadFile(rel, fileName, bytes, contentType = "applicatio
         console.warn("Beschreibung nicht gesetzt", e);
       }
     }
-    return { name, webUrl: item.webUrl, id: item.id };
+    return { name, webUrl: item.webUrl, id: item.id, driveId: item.parentReference?.driveId || "" };
   }
   throw new Error("Zu viele gleichnamige Dateien");
 }
