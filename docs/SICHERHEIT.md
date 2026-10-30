@@ -58,6 +58,17 @@ jemand sie aktiv teilt, hineinzieht oder auswählt.
 - Gleichzeitige Änderungen zweier Geräte an der Liste werden über die Versionskennung von OneDrive erkannt
   (kein stilles Überschreiben).
 
+## Gutscheine und Pakete
+
+- Gutscheincodes, PINs, Abholcodes und Abholadressen liegen in `_Gutscheine.json` bzw.
+  `_Paketbenachrichtigungen.json` im Archivordner – mit denselben Zugriffsrechten wie die Dokumente selbst –
+  und als Kopie für die Anzeige ohne Netz im lokalen Speicher des Geräts.
+- Paketeinträge enthalten ein Bild des Zettels (für den Barcode an der Theke). Es wird mit „Abgeholt“ zusammen
+  mit der Datei entfernt.
+- „Abgeholt“ löscht über Microsoft Graph; bei privaten Konten landet die Datei im Papierkorb, nichts wird
+  endgültig gelöscht.
+- Der Kartenlink öffnet Google Maps mit dem Abholort – erst auf ausdrücklichen Tipp, nie automatisch.
+
 ## Regeln für Erweiterungen
 
 - Keine Schlüssel, Passwörter oder persönlichen Daten in den Code oder in Testdateien.

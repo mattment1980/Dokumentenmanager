@@ -14,7 +14,10 @@ import * as od from "./services/onedrive.js";
 import { checkShareInbox, listenForLaunchFiles } from "./importers/sources.js";
 
 // Funktionsmodule (melden sich an den Erweiterungspunkten in core/extensions.js an)
+// Abschalten einzelner Module: Einstellungen → „Funktionen“ (core/features.js), nicht hier.
 import "./features/invoices/index.js";
+import "./features/vouchers/index.js";
+import "./features/parcels/index.js";
 
 // Bildschirme (melden sich selbst beim Router an)
 import "./screens/setup.js";
@@ -29,6 +32,8 @@ import "./screens/done.js";
 import "./screens/shared.js";
 import "./screens/settings.js";
 import "./screens/invoices.js";
+import "./screens/vouchers.js";
+import "./screens/parcel.js";
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;

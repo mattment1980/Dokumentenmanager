@@ -18,7 +18,8 @@ import { busy, unbusy, toast, errText } from "./ui.js";
 import { archiveLabel } from "./archive.js";
 import { enqueue, processQueue } from "./uploader.js";
 import { emit } from "./events.js";
-import { getAiFields, getReviewSections, applySaveFilters, applyDraftInits } from "./extensions.js";
+import { getAiFields, getReviewSections, getFixedTarget, applySaveFilters, applySavePrepares, applyDraftInits } from "./extensions.js";
+import { activeStructure } from "./features.js";
 import { settings, queue } from "../services/storage.js";
 import * as ai from "../services/ai.js";
 import { aiInput, buildFinal, defaultDate, describe, AI_PDF_LIMIT } from "../documents/job.js";
@@ -120,7 +121,7 @@ async function runAi(job) {
     const sug = await ai.suggest({
       key: settings.get("apiKey", ""),
       model: settings.get("model", APP.defaultModel),
-      structure: S.structure,
+      structure: activeStructure(),
       ...input,
       extraFields: getAiFields().map(({ name, schema, rule }) => ({ name, schema, rule })),
       today: todayIso(),
@@ -153,12 +154,17 @@ async function runAi(job) {
 
 // ---------- Prüfen ----------
 
-/** Gibt eine Meldung zurück, was noch fehlt, oder "" wenn alles passt. */
-export function validate(d) {
+/**
+ * Gibt eine Meldung zurück, was noch fehlt, oder "" wenn alles passt.
+ * fixedTarget = true, wenn ein Funktionsmodul den Ablageort vorgibt (dann ist keine Ordnerwahl nötig).
+ */
+export function validate(d, { fixedTarget = false } = {}) {
   if (!d.doctype) return "Bitte Dokumenttyp wählen.";
-  if (!d.folder) return "Bitte Ordner wählen.";
-  const f = folderByName(d.folder);
-  if (f && f.children && f.children.length && !d.subfolder) return "Bitte Unterordner wählen.";
+  if (!fixedTarget) {
+    if (!d.folder) return "Bitte Ordner wählen.";
+    const f = folderByName(d.folder);
+    if (f && f.children && f.children.length && !d.subfolder) return "Bitte Unterordner wählen.";
+  }
   if (!isValidIsoDate(d.date)) return "Bitte gültiges Datum eingeben.";
   if (!d.sender.trim()) return "Bitte Absender eintragen.";
   if (!d.title.trim()) return "Bitte Titel eintragen.";
@@ -167,7 +173,7 @@ export function validate(d) {
 
 /** Prüft Grunddaten und alle Zusatzabschnitte der Erweiterungen. */
 export function validateAll(job, d) {
-  return validate(d) || getReviewSections(job, d).map((sec) => sec.validate?.(job, d) || "").find(Boolean) || "";
+  return validate(d, { fixedTarget: !!getFixedTarget(job, d) }) || getReviewSections(job, d).map((sec) => sec.validate?.(job, d) || "").find(Boolean) || "";
 }
 
 export function fileNameFor(job, d) {
@@ -186,7 +192,7 @@ export function planSave(job, d) {
     job,
     draft: d,
     who,
-    rel: [d.folder, d.subfolder].filter(Boolean),
+    rel: getFixedTarget(job, d)?.rel || [d.folder, d.subfolder].filter(Boolean),
     fileName: fileNameFor(job, d),
     description: `Abgelegt von: ${who} am ${new Date().toLocaleDateString("de-DE")} · Dokumenttyp: ${d.doctype} · Absender: ${String(d.sender || "").trim()}`,
     meta: {},
@@ -194,7 +200,7 @@ export function planSave(job, d) {
 }
 
 export function targetPath(job, d) {
-  const rel = d.folder ? planSave(job, d).rel : ["…"];
+  const rel = d.folder || getFixedTarget(job, d) ? planSave(job, d).rel : ["…"];
   return [archiveLabel(), ...rel].join(" / ");
 }
 
@@ -209,6 +215,7 @@ export async function saveCurrent() {
   const { rel, fileName, description, who } = plan;
   busy("Wird abgelegt …");
   try {
+    await applySavePrepares(plan);
     const out = await buildFinal(job, {
       title: `${d.sender.trim()} – ${d.title.trim()}`,
       author: who,

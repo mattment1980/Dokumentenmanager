@@ -7,15 +7,24 @@
  */
 import { APP, DEFAULT_STRUCTURE } from "../core/config.js";
 import { S, clone, uploaderName } from "../core/state.js";
-import { registerScreen, go, resetTo } from "../core/router.js";
+import { registerScreen, go, resetTo, isCurrent } from "../core/router.js";
+import { on } from "../core/events.js";
 import { app, $, $$, esc, topbar, toast, busy, unbusy, copyText, errText } from "../core/ui.js";
 import { I } from "../core/icons.js";
 import { setArchive } from "../core/archive.js";
-import { loadRemoteConfig, saveStructure, normalizeStructure, checkStructure } from "../core/structure.js";
+import { loadRemoteConfig, saveStructure, saveFeatures, normalizeStructure, checkStructure } from "../core/structure.js";
+import { getFeatures, isEnabled } from "../core/features.js";
 import { settings } from "../services/storage.js";
 import * as od from "../services/onedrive.js";
 import * as ai from "../services/ai.js";
 import { cleanFolderName } from "../documents/naming.js";
+
+// Stand der Struktur, von dem die Bearbeitung ausging (ohne Schalter) – zum Erkennen ungespeicherter Änderungen
+let base = "";
+const comparable = (st) => {
+  const { features, ...rest } = normalizeStructure(st);
+  return JSON.stringify(rest);
+};
 
 const screen = {
   /** Beim Öffnen immer mit der aktuellen Struktur beginnen (ungespeicherte Änderungen verwerfen). */
@@ -24,7 +33,10 @@ const screen = {
   },
 
   render() {
-    if (!S.edit) S.edit = clone(S.structure);
+    if (!S.edit) {
+      S.edit = clone(S.structure);
+      base = comparable(S.edit);
+    }
     const key = settings.get("apiKey", "");
     const model = settings.get("model", APP.defaultModel);
     app.innerHTML = `${topbar("Einstellungen")}
@@ -62,6 +74,15 @@ const screen = {
         </div>
         <label class="field" style="margin:6px 0 0"><span>Modell</span>
           <select id="model">${APP.models.map((m) => `<option value="${m.id}" ${m.id === model ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
+      </div>
+
+      <div class="card" id="features">
+        <h2>Funktionen</h2>
+        <p class="muted small" style="margin-top:0">Gilt für alle, die diesen Archivordner nutzen. Beim Abschalten bleiben Dateien und Listen erhalten.</p>
+        ${getFeatures().map((f) => `<label class="pick">
+          <input type="checkbox" data-feature="${esc(f.id)}" ${isEnabled(f.id) ? "checked" : ""}>
+          <span class="grow"><b>${esc(f.label)}</b><span class="path">${esc(f.description)}</span></span>
+        </label>`).join("")}
       </div>
 
       <div class="card">
@@ -112,7 +133,7 @@ const screen = {
       S.configMissing = false;
       toast("Eigenes OneDrive wird verwendet");
       await loadRemoteConfig();
-      S.edit = clone(S.structure);
+      S.edit = null;
       this.render();
     };
     $("#pickShared") && ($("#pickShared").onclick = () => go("shared"));
@@ -122,7 +143,7 @@ const screen = {
       setArchive({ mode: "own", path: parts.join("/") });
       toast(`Archivordner: ${S.root}`);
       await loadRemoteConfig();
-      S.edit = clone(S.structure);
+      S.edit = null;
       this.render();
     });
     $("#saveKey").onclick = () => {
@@ -150,6 +171,7 @@ const screen = {
       this.render();
     };
     $("#model").onchange = (e) => settings.set("model", e.target.value);
+    $$("[data-feature]").forEach((cb) => (cb.onchange = () => this.toggleFeature(cb)));
     $("#addFolder").onclick = () => {
       S.edit.folders.push({ name: "Neuer Ordner", description: "", children: [], _open: true });
       this.renderEditor();
@@ -160,7 +182,7 @@ const screen = {
     };
     $("#saveStruct").onclick = () => this.save();
     $("#discard").onclick = () => {
-      S.edit = clone(S.structure);
+      S.edit = null;
       this.render();
     };
     $("#reset").onclick = () => {
@@ -256,6 +278,28 @@ const screen = {
     });
   },
 
+  /** Funktionsmodul an/aus – wird sofort in der gemeinsamen Konfiguration gespeichert. */
+  async toggleFeature(cb) {
+    const id = cb.dataset.feature;
+    const label = getFeatures().find((f) => f.id === id)?.label || id;
+    if (!S.account) {
+      cb.checked = !cb.checked;
+      return toast("Bitte zuerst anmelden.");
+    }
+    busy(cb.checked ? `${label} wird eingeschaltet …` : `${label} wird abgeschaltet …`);
+    try {
+      const st = await saveFeatures({ [id]: cb.checked });
+      // Ungespeicherte Änderungen an der Struktur behalten, nur die Schalter übernehmen
+      if (S.edit) S.edit.features = clone(st.features);
+      unbusy();
+      toast(`${label}: ${cb.checked ? "an" : "aus"}`);
+    } catch (e) {
+      unbusy();
+      cb.checked = !cb.checked;
+      toast(e instanceof od.AuthNeeded ? "Bitte neu anmelden und nochmal versuchen." : "Speichern fehlgeschlagen: " + errText(e), 6000);
+    }
+  },
+
   async save() {
     const st = normalizeStructure(S.edit);
     const err = checkStructure(st);
@@ -264,7 +308,7 @@ const screen = {
     busy("Struktur wird gespeichert …");
     try {
       await saveStructure(st);
-      S.edit = clone(st);
+      S.edit = null;
       unbusy();
       toast("Struktur gespeichert ✓");
       this.render();
@@ -277,3 +321,13 @@ const screen = {
 };
 
 registerScreen("settings", screen);
+
+// Konfiguration hat sich geändert (z. B. ein eingeschaltetes Modul hat seinen Ordner ergänzt):
+// Bearbeitungskopie auffrischen, sofern nichts ungespeichert ist.
+on("config:loaded", () => {
+  if (!isCurrent("settings") || !S.edit || comparable(S.edit) !== base) return;
+  const y = window.scrollY;
+  S.edit = null;
+  screen.render();
+  window.scrollTo(0, y);
+});

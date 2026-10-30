@@ -22,8 +22,10 @@ js/
     ui.js / icons.js    Helfer (esc, toast, busy, topbar …) und Symbole
     events.js           Ereignis-Bus für Erweiterungen
     extensions.js       Erweiterungspunkte für Funktionsmodule (siehe unten)
+    features.js         Anmeldung und Schalter der Funktionsmodule (an/aus)
+    sharedlist.js       gemeinsame, konfliktsichere Liste in OneDrive (für Funktionsmodule)
     archive.js          aktiver Archivordner (eigen / geteilt)
-    structure.js        Ordnerstruktur laden, prüfen, speichern
+    structure.js        Ordnerstruktur laden, prüfen, speichern; Ergänzungen durch Module, Schalter speichern
     uploader.js         Upload-Warteschlange (offline-fest)
     pipeline.js         zentraler Ablauf: Stapel → Weg → Prüfen → Ablegen
   services/           Anbindungen nach außen – ohne Oberfläche, ohne App-Zustand
@@ -36,6 +38,7 @@ js/
     scan.js             Fotos: Kanten erkennen, entzerren, Kontrast
     naming.js           Dateinamen-Schema
     filetypes.js        welche Dateitypen wie verarbeitet werden
+    values.js           Beträge und Daten lesen und anzeigen
   importers/          Eingangskanäle
     index.js            zentrale Annahme: Dateien → Jobs
     mail.js             .eml und .msg einlesen
@@ -44,7 +47,13 @@ js/
     invoices/           Rechnungen: Bezahlt-Frage, offene Liste, „Überwiesen“
       index.js            Anmeldung an den Erweiterungspunkten, Aktionen (markPaid …)
       register.js         gemeinsame Liste in OneDrive (_Offene-Rechnungen.json), konfliktsicher
-      payment.js          IBAN-Prüfung, Beträge, Fälligkeit (reine Funktionen)
+      payment.js          IBAN-Prüfung, Fälligkeit (reine Funktionen)
+    vouchers/           Gutscheine: eigener Hauptordner, offene Liste, Benutzt/Teilweise/Abgelaufen
+      index.js            Anmeldung an den Erweiterungspunkten, Aktionen (retire, redeemPartly …)
+      model.js            Konfiguration ergänzen, Gültigkeit, Sortierung (reine Funktionen)
+    parcels/            Paketbenachrichtigungen: Box auf der Startseite, Zettel zeigen, Abgeholt = löschen
+      index.js            Anmeldung, Vorschaubild beim Ablegen, Aktion pickedUp
+      model.js            Fristen, Kartenlink (reine Funktionen)
   screens/            je Bildschirm eine Datei (registerScreen)
 
 vendor/               fremde Bibliotheken, fest im Repository (siehe tools/vendor/README.md)
@@ -111,9 +120,40 @@ zu kennen. So bleibt jedes Modul in sich geschlossen und lässt sich ab- oder um
 | `registerReviewSection({id, applies, render, bind, validate})` | Prüfen-Bildschirm | „Bezahlt?“ mit Zahlungsdaten |
 | `registerSaveFilter(fn(plan))` | vor dem Ablegen | Zielordner, `_bezahlt`, Vermerk, `plan.meta` |
 | `registerHomeSection({id, render, bind})` | Startseite | Kachel „Offene Rechnungen“ |
+| `registerSavePrepare(async fn(plan))` | beim Ablegen, vor dem Hochladen (asynchron) | Pakete: Bild des Zettels in `plan.meta` |
+
+Ein Prüfen-Abschnitt kann mit `target(job, draft)` den Ablageort festlegen (z. B. Gutscheine → `15_Gutscheine`,
+Pakete → `00_Eingang/Paketbenachrichtigungen`). Der Prüfen-Bildschirm zeigt dann statt der Ordnerwahl den festen Ort
+(mit `targetNote`), und die Ordnerwahl ist keine Pflicht mehr.
 
 `plan.meta` wird mit der Datei in die Warteschlange gelegt und nach dem erfolgreichen Upload im Ereignis
 `queue:uploaded` zurückgegeben – so funktioniert die Nachbearbeitung auch, wenn erst später hochgeladen wird.
+
+## Funktionsmodule an- und abschalten (`core/features.js`)
+
+Jedes Modul meldet sich mit `registerFeature({ id, label, description })` an und kennzeichnet seine Erweiterungen
+mit `feature: "<id>"` (bei Funktionen: `registerSaveFilter(fn, { feature })`). Der Schalter steht in der
+gemeinsamen Konfiguration (`features: { vouchers: false, … }`, fehlend = an) und gilt für alle Nutzer des Archivs.
+Abgeschaltet heißt: KI-Felder, Prüfen-Abschnitte, Ablage-Filter und Startseiten-Bausteine des Moduls werden
+übersprungen, seine Dokumenttypen (`doctype.feature`) sind nicht wählbar und gehen nicht an die KI. Daten und
+Listen in OneDrive bleiben erhalten. Bedienung: Einstellungen → „Funktionen“.
+
+Braucht ein Modul Dokumenttypen oder Ordner, ergänzt es sie selbst beim Ereignis `config:loaded` über
+`extendStructure()` (liest die aktuelle Konfiguration, schreibt konfliktsicher, nacheinander). Die Teile tragen
+`feature: "<id>"`, damit sie auch nach Umbenennen erkannt werden. Wer den Typ „Gutschein“ loswerden will, schaltet
+das Modul ab – bei eingeschaltetem Modul wird er sonst wieder ergänzt.
+
+## Gemeinsame Listen
+
+| Datei im Archivordner | Modul | Inhalt |
+|-----------------------|-------|--------|
+| `_Offene-Rechnungen.json` | invoices | offene Rechnungen, bekannte IBANs je Empfänger |
+| `_Gutscheine.json` | vouchers | offene Gutscheine (Händler, Betrag, Code, PIN, Ablauf, Verlauf „teilweise“) |
+| `_Paketbenachrichtigungen.json` | parcels | offene Abholzettel samt Vorschaubild (JPEG, ≤ 450 KB) |
+
+Gutscheine und Pakete nutzen `core/sharedlist.js` (gleiches Verfahren wie die Rechnungsliste: lesen mit
+Versionskennung, schreiben nur bei unveränderter Datei, sonst neuer Versuch). Nach jeder Änderung kommen die
+Ereignisse `<modul>:changed` und `home:changed`.
 
 ## Erweitern – wo gehört was hin?
 
@@ -135,6 +175,8 @@ zu kennen. So bleibt jedes Modul in sich geschlossen und lässt sich ab- oder um
 | `queue:changed`   | –     | Warteschlange verändert (Upload fertig, Fehler …) |
 | `config:loaded`   | Struktur | Ordnerstruktur geladen oder gespeichert |
 | `invoices:changed`| Register | Liste der offenen Rechnungen geändert |
+| `vouchers:changed`, `parcels:changed` | Liste | Gutschein- bzw. Paketliste geändert |
+| `home:changed`    | –     | etwas auf der Startseite hat sich geändert (Listen der Module) |
 
 Beispiel für eine spätere Fristen-Erweiterung:
 

@@ -61,3 +61,16 @@ export function cleanFolderName(s) {
     .replace(/[.\s]+$/g, "")
     .slice(0, 80);
 }
+
+/**
+ * Name für einen neuen Hauptordner, fortlaufend nummeriert wie die vorhandenen:
+ * ["00_Eingang", …, "14_Kinder"] + "Gutscheine" → "15_Gutscheine".
+ * Sind die vorhandenen Ordner nicht nummeriert, bleibt der Name ohne Nummer.
+ */
+export function nextNumberedFolder(existing, base) {
+  const nums = existing.map((n) => String(n).match(/^(\d+)_/)).filter(Boolean);
+  if (!nums.length) return cleanFolderName(base);
+  const width = Math.max(...nums.map((m) => m[1].length));
+  const next = Math.max(...nums.map((m) => Number(m[1]))) + 1;
+  return `${String(next).padStart(width, "0")}_${cleanFolderName(base)}`;
+}

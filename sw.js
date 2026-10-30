@@ -11,7 +11,7 @@
  * Pflege: CACHE muss zur Version in js/core/config.js passen; SHELL muss alle Dateien der App
  * enthalten. Beides prüft tests/unit/release.test.mjs.
  */
-const CACHE = "dm-v2.1.0";
+const CACHE = "dm-v2.2.0";
 const SHARE_CACHE = "dm-share";
 const SHELL = [
   "./",
@@ -25,9 +25,11 @@ const SHELL = [
   "js/core/config.js",
   "js/core/events.js",
   "js/core/extensions.js",
+  "js/core/features.js",
   "js/core/icons.js",
   "js/core/pipeline.js",
   "js/core/router.js",
+  "js/core/sharedlist.js",
   "js/core/state.js",
   "js/core/structure.js",
   "js/core/ui.js",
@@ -35,11 +37,16 @@ const SHELL = [
   "js/features/invoices/index.js",
   "js/features/invoices/payment.js",
   "js/features/invoices/register.js",
+  "js/features/parcels/index.js",
+  "js/features/parcels/model.js",
+  "js/features/vouchers/index.js",
+  "js/features/vouchers/model.js",
   "js/documents/filetypes.js",
   "js/documents/job.js",
   "js/documents/naming.js",
   "js/documents/pdf.js",
   "js/documents/scan.js",
+  "js/documents/values.js",
   "js/importers/index.js",
   "js/importers/mail.js",
   "js/importers/sources.js",
@@ -50,11 +57,13 @@ const SHELL = [
   "js/screens/login.js",
   "js/screens/mail.js",
   "js/screens/pages.js",
+  "js/screens/parcel.js",
   "js/screens/parts.js",
   "js/screens/review.js",
   "js/screens/route.js",
   "js/screens/settings.js",
   "js/screens/setup.js",
+  "js/screens/vouchers.js",
   "js/screens/shared.js",
   "js/services/ai.js",
   "js/services/onedrive.js",

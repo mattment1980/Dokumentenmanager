@@ -12,6 +12,7 @@ export class AuthNeeded extends Error {
 const st = JSON.parse(localStorage.getItem("__od") || "null") || { uploads: [], config: null, sharedConfig: null, sharedOk: false, files: {}, moves: [] };
 st.files = st.files || {};
 st.moves = st.moves || [];
+st.deleted = st.deleted || [];
 window.__od = st;
 const save = () => localStorage.setItem("__od", JSON.stringify(st));
 let archive = { mode: "own", path: "11_Dokumentenarchiv" };
@@ -83,7 +84,16 @@ export async function moveItem(file, targetRel, newName, { description } = {}) {
   save();
   return { name: newName, webUrl: "https://onedrive.example/moved", id: file.id };
 }
-export async function ensureFolder() {}
+export async function deleteItem(file) {
+  st.deleted.push(file.id);
+  save();
+  return true;
+}
+export async function ensureFolder(rel) {
+  st.folders = st.folders || [];
+  st.folders.push((rel || []).join("/"));
+  save();
+}
 export async function ensureStructure(s, cb) {
   st.structureCreated = (st.structureCreated || 0) + 1;
   cb && cb(1, 1);

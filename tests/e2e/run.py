@@ -6,9 +6,10 @@ Aufruf:        python3 tests/e2e/run.py          Bildschirmfotos landen in tests
 
 Geprüft werden: Scannen (KI und direkt), E-Mail mit einem Anhang (direkt weiter, Mailtext angehängt),
 E-Mail mit mehreren Anhängen (Auswahl, Stapel, Überspringen), Mail ohne Anhang, Hineinziehen,
-Teilen (Android), Struktur bearbeiten, geteilter Ordner, Service Worker für das Teilen-Ziel.
+Teilen (Android), Struktur bearbeiten, geteilter Ordner, Service Worker für das Teilen-Ziel,
+Rechnungen, Gutscheine, Paketbenachrichtigungen, Funktionen an- und abschalten.
 """
-import base64, functools, http.server, io, json, os, sys, threading
+import base64, datetime, functools, http.server, io, json, os, sys, threading
 from playwright.sync_api import sync_playwright
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -35,6 +36,14 @@ SUGGESTIONS = [
 INVOICE = {"folder": "13_Anschaffungen & Garantien", "subfolder": "", "doctype": "Rechnung", "sender": "Elektro Muster", "title": "Waschmaschine", "letter_date": "2026-10-20", "confidence": 0.9, "reason": "Rechnung für ein Gerät.",
            "zahlung": {"empfaenger": "Elektro Muster GmbH", "iban": "DE89 3704 0044 0532 0130 00", "betrag": 649.9, "verwendungszweck": "RE-2026-4711", "faellig_am": "2026-11-03", "lastschrift": False}}
 
+TODAY = datetime.date.today()
+iso = lambda days: (TODAY + datetime.timedelta(days=days)).isoformat()
+VOUCHER = {"folder": "00_Eingang", "subfolder": "", "doctype": "Gutschein", "sender": "Buchhandlung Muster", "title": "Geschenkgutschein", "letter_date": iso(-3), "confidence": 0.9, "reason": "Gutschein.",
+           "gutschein": {"einloesbar_bei": "Buchhandlung Muster", "wofuer": "Einkauf", "betrag": 50, "code": "ABCD-1234", "pin": "9876", "gueltig_bis": iso(20), "einloesung": "beides"}}
+PARCEL = {"folder": "00_Eingang", "subfolder": "", "doctype": "Paketbenachrichtigung", "sender": "DHL", "title": "Paket abholen", "letter_date": iso(0), "confidence": 0.95, "reason": "Benachrichtigungskarte.",
+          "paket": {"dienstleister": "DHL", "abholort": "Postfiliale", "adresse": "Hauptstr. 1, 12345 Musterstadt", "zustellversuch_am": iso(0), "abholbar_bis": iso(1), "code": "JJD000123", "empfaenger": "Testi"}}
+SPECIAL = [None]
+
 def anthropic(route):
     body = json.loads(route.request.post_data)
     ai_calls.append(body)
@@ -42,7 +51,7 @@ def anthropic(route):
         return route.fulfill(status=400, headers={"access-control-allow-origin": "*"}, body='{"error":{"message":"tool_choice not supported"}}')
     if body.get("max_tokens") == 1:
         return route.fulfill(status=200, headers={"access-control-allow-origin": "*", "content-type": "application/json"}, body='{"content":[]}')
-    sug = INVOICE if USE_INVOICE[0] else SUGGESTIONS[min(len([c for c in ai_calls if c.get("max_tokens") != 1]) - 1, len(SUGGESTIONS) - 1)]
+    sug = SPECIAL[0] if SPECIAL[0] else INVOICE if USE_INVOICE[0] else SUGGESTIONS[min(len([c for c in ai_calls if c.get("max_tokens") != 1]) - 1, len(SUGGESTIONS) - 1)]
     route.fulfill(status=200, headers={"access-control-allow-origin": "*", "content-type": "application/json"},
                   body=json.dumps({"content": [{"type": "tool_use", "name": "ablage_vorschlag", "input": sug}]}))
 
@@ -52,6 +61,13 @@ USE_INVOICE = [False]
 def check(name, cond, info=""):
     checks.append((name, bool(cond)))
     print(("  ok   " if cond else "  FEHL ") + name + (f"  [{info}]" if info and not cond else ""))
+
+def od(pg):
+    return pg.evaluate("JSON.parse(localStorage.getItem('__od')||'{}')")
+
+def scan_with_ai(pg):
+    pg.set_input_files("#camInput", os.path.join(FX, "brief.jpg")); pg.wait_for_selector("#next", timeout=20000); pg.click("#next")
+    pg.click("#ai"); pg.wait_for_selector("#save", timeout=20000)
 
 def uploads(pg):
     return pg.evaluate("JSON.parse(localStorage.getItem('__od')||'{}').uploads||[]")
@@ -270,8 +286,119 @@ with sync_playwright() as p:
     check("Liste aktualisiert", pg.locator(".inv").count() == 1)
     USE_INVOICE[0] = False
 
+    print("12) Gutscheine: Konfiguration ergänzt, ablegen, Liste, teilweise, benutzt")
+    pg.click("[data-act=back]"); pg.wait_for_selector("#scan")
+    cfg = od(pg)["config"]
+    dts = [d["name"] for d in cfg["doctypes"]]
+    vf = [f for f in cfg["folders"] if f.get("feature") == "vouchers"]
+    check("Dokumenttyp Gutschein ergänzt (vor dem Auffangtyp)", "Gutschein" in dts and dts[-1] == "Information/Sonstiges", dts)
+    check("Hauptordner fortlaufend nummeriert (14_Gutscheine)", len(vf) == 1 and vf[0]["name"] == "14_Gutscheine", [f["name"] for f in cfg["folders"]])
+    check("Unterordner Verbraucht angelegt", "14_Gutscheine/Verbraucht" in od(pg).get("folders", []))
+    check("Startseite: Kachel 'Offene Gutscheine'", pg.is_visible("#tileVouchers") and "Keine offenen Gutscheine" in pg.inner_text("#tileVouchers"))
+    SPECIAL[0] = VOUCHER
+    n_ai = len(ai_calls)
+    scan_with_ai(pg)
+    check("KI-Schema enthält Gutscheinfelder", "gutschein" in ai_calls[n_ai]["tools"][0]["input_schema"]["properties"])
+    check("Fester Ablageort statt Ordnerwahl", pg.is_visible("#fixedTarget") and "14_Gutscheine" in pg.inner_text("#fixedTarget") and not pg.query_selector("#fo"))
+    check("KI-Werte vorbelegt (Betrag, Code, Einlösung)", pg.input_value("[data-v=amount]") == "50,00" and pg.input_value("[data-v=code]") == "ABCD-1234" and "on" in pg.get_attribute("#vouRedeem [data-r=both]", "class"))
+    pg.screenshot(path=f"{SHOTS}/13_review_voucher.png", full_page=True)
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000)
+    u = uploads(pg)[-1]
+    check("Upload nach 14_Gutscheine", u["rel"] == "14_Gutscheine" and "_Gutschein_" in u["name"], u["rel"])
+    reg = od(pg)["files"]["own:_Gutscheine.json"]["data"]
+    e = reg["open"][0] if reg["open"] else {}
+    check("Listeneintrag mit Gutscheindaten", e.get("merchant") == "Buchhandlung Muster" and e.get("amount") == 50 and e.get("pin") == "9876" and e.get("validUntil") == iso(20) and e.get("folder") == "14_Gutscheine", e)
+    SPECIAL[0] = None
+
+    # Zweiter Gutschein direkt: Leistung ohne Betrag, ohne Ablaufdatum
+    pg.click("[data-act=home]"); pg.wait_for_selector("#tileVouchers")
+    pg.set_input_files("#camInput", os.path.join(FX, "brief.jpg")); pg.wait_for_selector("#next", timeout=20000); pg.click("#next")
+    pg.click("#direct"); pg.wait_for_selector("#save")
+    pg.click("#dt [data-v='Gutschein']"); pg.wait_for_selector("#vou")
+    pg.fill("#sender", "Therme"); pg.fill("#title", "Wellness")
+    check("Ohne Betrag und 'Wofür' kein Ablegen", pg.is_disabled("#save"))
+    pg.fill("[data-v=what]", "Massage 60 Minuten")
+    check("Händler aus Absender genügt", not pg.is_disabled("#save"), pg.inner_text("#pv"))
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000)
+    pg.click("[data-act=home]"); pg.wait_for_selector("#tileVouchers"); pg.wait_for_timeout(200)
+    tile = pg.inner_text("#tileVouchers")
+    check("Kachel: 2 offen, läuft bald ab, Summe", "2 offen" in tile and "1 läuft bald ab" in tile and "50,00" in tile, tile)
+    pg.screenshot(path=f"{SHOTS}/14_home_vouchers.png")
+    pg.click("#tileVouchers"); pg.wait_for_selector(".vou", timeout=10000); pg.wait_for_timeout(300)
+    names = pg.locator(".vou .fname").all_inner_texts()
+    check("Liste sortiert nach Ablaufdatum (ohne Datum zuletzt)", names == ["Buchhandlung Muster", "Therme"], names)
+    check("Bald ablaufender Gutschein hervorgehoben", "soon" in pg.get_attribute(".vou >> nth=0", "class") and "noch 20 Tage" in pg.inner_text(".vou >> nth=0"))
+    check("Teilweise nur bei Betrag", pg.locator(".vou >> nth=0").locator("[data-part]").count() == 1 and pg.locator(".vou >> nth=1").locator("[data-part]").count() == 0)
+    pg.screenshot(path=f"{SHOTS}/15_vouchers.png", full_page=True)
+    pg.locator("[data-part]").first.click(); pg.wait_for_selector("[data-rest]")
+    pg.fill("[data-rest]", "60"); pg.click("[data-savepart]"); pg.wait_for_timeout(300)
+    check("Restbetrag größer als Wert wird abgelehnt", od(pg)["files"]["own:_Gutscheine.json"]["data"]["open"][0]["amount"] == 50)
+    pg.fill("[data-rest]", "20,50"); pg.click("[data-savepart]"); pg.wait_for_timeout(500)
+    e = [x for x in od(pg)["files"]["own:_Gutscheine.json"]["data"]["open"] if x["merchant"] == "Buchhandlung Muster"][0]
+    check("Teilweise eingelöst: Restbetrag und Verlauf", e["amount"] == 20.5 and e["originalAmount"] == 50 and e["log"][0]["to"] == 20.5, e)
+    check("Liste zeigt neuen Restbetrag", "20,50" in pg.inner_text(".vou >> nth=0"))
+    pg.locator("[data-used]").first.click(); pg.wait_for_timeout(600)
+    mv = od(pg)["moves"][-1]
+    check("Benutzt: nach 14_Gutscheine/Verbraucht verschoben", mv["targetRel"] == "14_Gutscheine/Verbraucht" and "Eingelöst am" in mv["description"], mv)
+    check("Liste danach mit 1 Gutschein", len(od(pg)["files"]["own:_Gutscheine.json"]["data"]["open"]) == 1 and pg.locator(".vou").count() == 1)
+
+    print("13) Paketbenachrichtigungen: ablegen, Box, Zettel zeigen, abgeholt")
+    pg.click("[data-act=back]"); pg.wait_for_selector("#scan"); pg.wait_for_timeout(200)
+    check("Dokumenttyp Paketbenachrichtigung ergänzt", any(d["name"] == "Paketbenachrichtigung" and d.get("feature") == "parcels" for d in od(pg)["config"]["doctypes"]))
+    check("Keine Paket-Box, solange nichts offen ist", not pg.query_selector("#parcelBox"))
+    SPECIAL[0] = PARCEL
+    n_ai = len(ai_calls)
+    scan_with_ai(pg)
+    check("KI-Schema enthält Paketfelder", "paket" in ai_calls[n_ai]["tools"][0]["input_schema"]["properties"])
+    check("Ablageort fest: Eingang/Paketbenachrichtigungen", "00_Eingang / Paketbenachrichtigungen" in pg.inner_text("#pv"), pg.inner_text("#pv"))
+    check("KI-Werte vorbelegt (Abholort, Frist, Code)", pg.input_value("[data-q=location]") == "Postfiliale" and pg.input_value("[data-q=until]") == iso(1) and pg.input_value("[data-q=code]") == "JJD000123")
+    pg.screenshot(path=f"{SHOTS}/16_review_parcel.png", full_page=True)
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000)
+    SPECIAL[0] = None
+    u = uploads(pg)[-1]
+    check("Upload nach 00_Eingang/Paketbenachrichtigungen", u["rel"] == "00_Eingang/Paketbenachrichtigungen", u["rel"])
+    e = od(pg)["files"]["own:_Paketbenachrichtigungen.json"]["data"]["open"][0]
+    check("Listeneintrag mit Vorschaubild des Zettels", e["carrier"] == "DHL" and e["preview"].startswith("data:image/jpeg;base64,") and len(e["preview"]) < 700000, len(e.get("preview", "")))
+    pg.click("[data-act=home]"); pg.wait_for_selector("#parcelBox"); pg.wait_for_timeout(200)
+    box = pg.inner_text("#parcelBox")
+    check("Box auf der Startseite mit Frist", "DHL · Postfiliale" in box and "bis morgen" in box, box)
+    pg.screenshot(path=f"{SHOTS}/17_home_parcel.png")
+    pg.click("[data-parcel]"); pg.wait_for_selector("#zoom")
+    check("Detail: Code, Karte", "JJD000123" in pg.inner_text("#app") and "google.com/maps" in pg.get_attribute("a:has-text('Karte')", "href"))
+    pg.screenshot(path=f"{SHOTS}/18_parcel.png", full_page=True)
+    pg.click("#zoom"); pg.wait_for_selector("#viewer")
+    check("Zettel bildschirmfüllend", pg.is_visible("#viewer img"))
+    pg.screenshot(path=f"{SHOTS}/19_parcel_zoom.png")
+    pg.click("#viewer"); pg.wait_for_timeout(200)
+    check("Vollbild schließt per Tipp", not pg.query_selector("#viewer"))
+    pg.click("#done"); pg.wait_for_selector("#scan", timeout=10000); pg.wait_for_timeout(300)
+    check("Abgeholt: Datei gelöscht (Papierkorb)", od(pg)["deleted"] == [e["file"]["id"]])
+    check("Abgeholt: Box verschwindet", not pg.query_selector("#parcelBox") and od(pg)["files"]["own:_Paketbenachrichtigungen.json"]["data"]["open"] == [])
+
+    print("14) Funktionen an- und abschalten")
+    pg.click("[data-act=settings]"); pg.wait_for_selector("#features")
+    check("Drei Funktionen mit Schalter, alle an", pg.locator("[data-feature]").count() == 3 and all(pg.is_checked(f"[data-feature={f}]") for f in ("invoices", "vouchers", "parcels")))
+    pg.uncheck("[data-feature=vouchers]"); pg.wait_for_timeout(500)
+    check("Schalter in der gemeinsamen Konfiguration gespeichert", od(pg)["config"].get("features", {}).get("vouchers") is False)
+    pg.screenshot(path=f"{SHOTS}/20_settings_features.png", full_page=True)
+    pg.click("[data-act=back]"); pg.wait_for_selector("#scan"); pg.wait_for_timeout(200)
+    check("Kachel Gutscheine ausgeblendet", not pg.query_selector("#tileVouchers") and pg.query_selector("#tileInvoices"))
+    n_ai = len(ai_calls)
+    scan_with_ai(pg)
+    check("Abgeschaltet: KI ohne Gutscheinfelder und -typ", "gutschein" not in ai_calls[n_ai]["tools"][0]["input_schema"]["properties"] and "Gutschein" not in ai_calls[n_ai]["tools"][0]["input_schema"]["properties"]["doctype"]["enum"])
+    check("Abgeschaltet: Dokumenttyp nicht wählbar", not pg.query_selector("#dt [data-v='Gutschein']") and pg.query_selector("#dt [data-v='Paketbenachrichtigung']"))
+    while not pg.query_selector("#discard"):
+        pg.click("[data-act=back]"); pg.wait_for_timeout(150)
+    pg.click("#discard")
+    pg.click("[data-act=settings]"); pg.wait_for_selector("#features")
+    pg.check("[data-feature=vouchers]"); pg.wait_for_timeout(500)
+    cfg = od(pg)["config"]
+    check("Wieder eingeschaltet, Ordner nicht doppelt", cfg["features"]["vouchers"] is True and len([f for f in cfg["folders"] if "Gutscheine" in f["name"]]) == 1)
+    pg.click("[data-act=back]"); pg.wait_for_selector("#tileVouchers")
+    check("Kachel wieder da, Liste unverändert", "1 offen" in pg.inner_text("#tileVouchers"))
+
     # Desktop-Ansicht der Startseite
-    pg.set_viewport_size({"width": 1280, "height": 800}); pg.click("[data-act=back]"); pg.wait_for_selector("#scan"); pg.wait_for_timeout(300)
+    pg.set_viewport_size({"width": 1280, "height": 800}); pg.wait_for_selector("#scan"); pg.wait_for_timeout(300)
     pg.screenshot(path=f"{SHOTS}/09_home_desktop.png")
     ctx.close()
 

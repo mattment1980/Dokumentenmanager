@@ -1,5 +1,32 @@
 # Änderungen
 
+## 2.2.0 – Gutscheine, Paketbenachrichtigungen, Funktionsschalter
+
+**Neu**
+- Gutscheine
+  - Neuer Dokumenttyp „Gutschein“ und eigener Hauptordner (nächste freie Nummer, z. B. `15_Gutscheine`) mit
+    Unterordner `Verbraucht` – beides wird beim ersten Start automatisch in der Konfiguration ergänzt
+  - KI liest Händler, Wofür, Betrag, Code, PIN, Ablaufdatum und Einlöseweg (online/vor Ort) aus
+  - Liste „Offene Gutscheine“ (Kachel auf der Startseite): sortiert nach Ablauf, Hervorhebung ab 30 Tagen vorher,
+    Code/PIN kopieren; „Benutzt“ und „Abgelaufen“ verschieben nach `Verbraucht`; „Teilweise“ speichert den Restbetrag
+- Paketbenachrichtigungen
+  - Neuer Dokumenttyp „Paketbenachrichtigung“, Ablage in `00_Eingang/Paketbenachrichtigungen`
+  - KI liest Dienstleister, Abholort und Adresse, Zustellversuch, Abholfrist (auch „7 Werktage“), Code und Empfänger
+  - Box „Pakete abholen“ auf der Startseite, nur wenn etwas offen ist; knappe Fristen rot
+  - Detail: Zettel bildschirmfüllend zum Vorzeigen, Kartenlink, Code kopieren; „Abgeholt“ löscht (Papierkorb)
+- Einstellungen → „Funktionen“: Rechnungen, Gutscheine und Pakete einzeln an-/abschalten, gemeinsam für alle
+  Nutzer des Archivs (in der Konfiguration in OneDrive)
+
+**Intern**
+- `core/features.js`: Anmeldung und Schalter der Funktionsmodule; Erweiterungen mit `feature` werden bei
+  abgeschaltetem Modul übersprungen, Dokumenttypen eines abgeschalteten Moduls ausgeblendet
+- Neue Erweiterungspunkte: fester Ablageort aus einem Prüfen-Abschnitt (`target`), asynchrone Ablage-Vorbereitung
+  (`registerSavePrepare`)
+- `core/sharedlist.js`: allgemeine, konfliktsichere Liste in OneDrive; `core/structure.js → extendStructure()`
+  zum Ergänzen der Konfiguration durch Module
+- `documents/values.js`: Beträge und Daten (aus dem Rechnungsmodul herausgelöst)
+- OneDrive-Dienst: Datei löschen (`deleteItem`, Papierkorb)
+
 ## 2.1.0 – Rechnungen
 
 **Neu**

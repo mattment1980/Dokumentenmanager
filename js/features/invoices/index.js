@@ -15,11 +15,14 @@
  *
  * Schutz: IBAN-Prüfsumme; Warnung, wenn ein Empfänger plötzlich eine andere IBAN nutzt.
  * Die App überweist nie selbst.
+ *
+ * Abschaltbar in den Einstellungen (core/features.js, id "invoices").
  */
 import { APP } from "../../core/config.js";
 import { S, doctypeByName, uploaderName } from "../../core/state.js";
 import { esc } from "../../core/ui.js";
 import { on } from "../../core/events.js";
+import { registerFeature } from "../../core/features.js";
 import { registerAiField, registerDraftInit, registerReviewSection, registerSaveFilter, registerHomeSection } from "../../core/extensions.js";
 import { go } from "../../core/router.js";
 import { history } from "../../services/storage.js";
@@ -27,6 +30,14 @@ import * as od from "../../services/onedrive.js";
 import * as register from "./register.js";
 import { normalizeIban, isValidIban, formatIban, parseAmount, formatAmount, isoToDe, withNameTag, daysUntil } from "./payment.js";
 import { isValidIsoDate } from "../../documents/naming.js";
+
+export const FEATURE = "invoices";
+
+registerFeature({
+  id: FEATURE,
+  label: "Rechnungen",
+  description: "Bei Rechnungen und Mahnungen „Bezahlt?“ fragen, Liste offener Rechnungen mit Überweisungsdaten.",
+});
 
 /** Unterordner im Eingang für offene Rechnungen. */
 export const OPEN_FOLDER = [APP.inboxFolder, "Unbezahlte Rechnungen"];
@@ -48,6 +59,7 @@ registerDraftInit((d) => {
 });
 
 registerAiField({
+  feature: FEATURE,
   name: "zahlung",
   schema: {
     type: "object",
@@ -93,6 +105,7 @@ const STATUS = [
 ];
 
 registerReviewSection({
+  feature: FEATURE,
   id: "payment",
   applies: (job, d) => isPayable(d.doctype),
   render(job, d) {
@@ -186,7 +199,7 @@ registerSaveFilter((plan) => {
       description,
     };
   }
-});
+}, { feature: FEATURE });
 
 // ---------- 4. Nach dem Hochladen: Register pflegen ----------
 
@@ -252,6 +265,7 @@ export function summary(d = register.current()) {
 // ---------- 6. Kachel auf der Startseite ----------
 
 registerHomeSection({
+  feature: FEATURE,
   id: "invoices",
   render() {
     const s = summary();

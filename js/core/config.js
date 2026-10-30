@@ -8,7 +8,7 @@
  */
 export const APP = {
   name: "Dokumentenmanager",
-  version: "2.1.0",
+  version: "2.2.0",
   CLIENT_ID: "092c210e-11a4-40b9-bea0-68f165ee0b73",
   // Exakt so in Entra als Umleitungs-URI (Typ Single-Page-Anwendung) eingetragen.
   // Wird verwendet, wenn die App unter dieser Domain läuft (unabhängig von Groß-/Kleinschreibung im Pfad).

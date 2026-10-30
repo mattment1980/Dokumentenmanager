@@ -56,13 +56,77 @@ export async function saveStructure(st) {
   apply(st);
 }
 
+/**
+ * Ergänzt die Konfiguration um Teile, die ein Funktionsmodul braucht (z. B. Dokumenttyp „Gutschein“,
+ * Ordner „15_Gutscheine“). Liest dazu die aktuelle Fassung aus OneDrive und schreibt konfliktsicher.
+ *
+ * @param {(st) => ({ ensure?: string[][] } | null)} change  ändert st direkt; gibt null zurück, wenn
+ *        nichts fehlt, sonst optional Ordner (relativ zum Archiv), die in OneDrive angelegt werden sollen
+ * @returns {Promise<boolean>} true, wenn die Konfiguration geändert wurde
+ */
+let extendChain = Promise.resolve();
+export function extendStructure(change) {
+  // Nacheinander ausführen, damit sich zwei Module beim ersten Start nicht gegenseitig überschreiben
+  const run = extendChain.then(() => extendOnce(change));
+  extendChain = run.catch(() => {});
+  return run;
+}
+
+async function extendOnce(change) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, eTag } = await od.readJsonMeta([APP.configFileName]);
+    if (!data || !Array.isArray(data.folders) || !Array.isArray(data.doctypes)) return false;
+    const st = clone(data);
+    const r = change(st);
+    if (!r) {
+      if (JSON.stringify(data) !== JSON.stringify(S.structure)) apply(data);
+      return false;
+    }
+    for (const rel of r.ensure || []) await od.ensureFolder(rel);
+    try {
+      await od.writeJson([APP.configFileName], st, eTag ? { ifMatch: eTag } : {});
+    } catch (e) {
+      if (e instanceof od.Conflict) continue;
+      throw e;
+    }
+    apply(st);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Funktionsmodule an-/abschalten (gilt für alle Nutzer des Archivs). Ändert nur den Eintrag
+ * "features" der Konfiguration, alles andere bleibt, wie es in OneDrive steht.
+ */
+export async function saveFeatures(features) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, eTag } = await od.readJsonMeta([APP.configFileName]);
+    const st = data && Array.isArray(data.folders) ? clone(data) : clone(S.structure);
+    st.features = { ...(st.features || {}), ...features };
+    try {
+      await od.writeJson([APP.configFileName], st, eTag ? { ifMatch: eTag } : {});
+    } catch (e) {
+      if (e instanceof od.Conflict) continue;
+      throw e;
+    }
+    apply(st);
+    return st;
+  }
+  throw new Error("Die Konfiguration wird gerade von einem anderen Gerät geändert. Bitte gleich nochmal versuchen.");
+}
+
 /** Bearbeitungskopie (mit Hilfsfeldern wie _open) in eine saubere Struktur umwandeln. */
 export function normalizeStructure(edit) {
   return {
     version: 1,
+    // Schalter der Funktionsmodule (core/features.js) unverändert übernehmen
+    ...(edit.features && typeof edit.features === "object" ? { features: { ...edit.features } } : {}),
     folders: edit.folders.map((f) => ({
       name: cleanFolderName(f.name),
       description: String(f.description || "").trim(),
+      // Zugehörigkeit zu einem Funktionsmodul erhalten (z. B. feature: "vouchers" für 15_Gutscheine)
+      ...(f.feature ? { feature: String(f.feature) } : {}),
       children: (f.children || [])
         .map((c) => ({ name: cleanFolderName(c.name), ...(String(c.description || "").trim() ? { description: String(c.description).trim() } : {}) }))
         .filter((c) => c.name),
@@ -74,6 +138,7 @@ export function normalizeStructure(edit) {
         hint: String(d.hint || "").trim(),
         // Zusatzmerkmale von Funktionsmodulen erhalten (z. B. payable für das Rechnungsmodul)
         ...(typeof d.payable === "boolean" ? { payable: d.payable } : {}),
+        ...(d.feature ? { feature: String(d.feature) } : {}),
       }))
       .filter((d) => d.name),
   };

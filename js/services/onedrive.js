@@ -254,6 +254,19 @@ export async function moveItem({ driveId, id }, targetRel, newName, { descriptio
   return { name: item.name, webUrl: item.webUrl, id: item.id };
 }
 
+/**
+ * Löscht eine Datei (per ID). Bei privaten OneDrive-Konten landet sie im Papierkorb des Besitzers
+ * und lässt sich dort etwa 30 Tage lang wiederherstellen – endgültig gelöscht wird nichts.
+ * @returns {Promise<boolean>} false, wenn die Datei schon nicht mehr da war
+ */
+export async function deleteItem({ driveId, id }) {
+  const url = driveId ? `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(id)}` : `/me/drive/items/${encodeURIComponent(id)}`;
+  const r = await gfetch(url, { method: "DELETE" });
+  if (r.status === 404) return false;
+  if (!r.ok) throw await graphError(r);
+  return true;
+}
+
 const known = new Set();
 
 export async function ensureFolder(rel, { archive: a = archive } = {}) {

@@ -62,3 +62,5 @@ registerScreen("home", {
 on("queue:changed", () => isCurrent("home") && render());
 on("config:loaded", () => isCurrent("home") && render());
 on("invoices:changed", () => isCurrent("home") && render());
+// Funktionsmodule melden geänderte Listen allgemein (core/sharedlist.js)
+on("home:changed", () => isCurrent("home") && render());

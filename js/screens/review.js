@@ -8,7 +8,9 @@ import { registerScreen, resetTo, render } from "../core/router.js";
 import { app, $, esc, topbar } from "../core/ui.js";
 import { I } from "../core/icons.js";
 import { batchInfo, validateAll, planSave, targetPath, saveCurrent, skipCurrent, abortAi } from "../core/pipeline.js";
-import { getReviewSections } from "../core/extensions.js";
+import { getReviewSections, getFixedTarget } from "../core/extensions.js";
+import { activeStructure } from "../core/features.js";
+import { archiveLabel } from "../core/archive.js";
 import { canAppendMail } from "../documents/job.js";
 import { jobCard } from "./parts.js";
 
@@ -34,7 +36,8 @@ const screen = {
     const subs = folder?.children || [];
     const ai = d.ai;
     const conf = ai && typeof ai.confidence === "number" ? Math.round(ai.confidence * 100) : null;
-    const st = S.structure;
+    const st = activeStructure();
+    const fixed = getFixedTarget(job, d);
     const mailToggle = canAppendMail(job)
       ? `<label class="pick"><input type="checkbox" id="appendMail" ${job.appendMail ? "checked" : ""}>
           <span class="grow"><b>Mailtext als letzte Seite anhängen</b><span class="path">Von, An, Datum, Betreff und Text der E-Mail</span></span></label>`
@@ -54,15 +57,7 @@ const screen = {
         <div class="chips" id="dt">${st.doctypes.map((t) => `<button class="chip ${d.doctype === t.name ? "on" : ""} ${ai && ai.doctype === t.name ? "ai" : ""}" data-v="${esc(t.name)}">${esc(t.name)}</button>`).join("")}</div>
       </div>
 
-      <div class="card">
-        <h2>Ordner</h2>
-        <div class="folders" id="fo">${st.folders.map((f) => {
-          const m = f.name.match(/^(\d+)_(.*)$/);
-          return `<button class="chip ${d.folder === f.name ? "on" : ""} ${ai && ai.folder === f.name ? "ai" : ""}" data-v="${esc(f.name)}">${m ? `<span class="n">${esc(m[1])}</span>${esc(m[2])}` : esc(f.name)}</button>`;
-        }).join("")}</div>
-        ${subs.length ? `<div style="height:12px"></div><h2>Unterordner</h2>
-          <div class="chips" id="sf">${subs.map((c) => `<button class="chip ${d.subfolder === c.name ? "on" : ""} ${ai && ai.subfolder === c.name && ai.folder === d.folder ? "ai" : ""}" data-v="${esc(c.name)}">${esc(c.name)}</button>`).join("")}</div>` : ""}
-      </div>
+      ${fixed ? fixedCard(fixed) : folderCard(st, d, ai, subs)}
 
       <div class="card">
         <label class="field"><span>Briefdatum</span><input type="date" id="date" value="${esc(d.date)}"></label>
@@ -128,5 +123,27 @@ const screen = {
     $("#save").disabled = !!v;
   },
 };
+
+/** Ordner- und Unterordnerwahl. */
+function folderCard(st, d, ai, subs) {
+  return `<div class="card">
+    <h2>Ordner</h2>
+    <div class="folders" id="fo">${st.folders.map((f) => {
+      const m = f.name.match(/^(\d+)_(.*)$/);
+      return `<button class="chip ${d.folder === f.name ? "on" : ""} ${ai && ai.folder === f.name ? "ai" : ""}" data-v="${esc(f.name)}">${m ? `<span class="n">${esc(m[1])}</span>${esc(m[2])}` : esc(f.name)}</button>`;
+    }).join("")}</div>
+    ${subs.length ? `<div style="height:12px"></div><h2>Unterordner</h2>
+      <div class="chips" id="sf">${subs.map((c) => `<button class="chip ${d.subfolder === c.name ? "on" : ""} ${ai && ai.subfolder === c.name && ai.folder === d.folder ? "ai" : ""}" data-v="${esc(c.name)}">${esc(c.name)}</button>`).join("")}</div>` : ""}
+  </div>`;
+}
+
+/** Fester Ablageort, den ein Funktionsmodul vorgibt (z. B. Gutscheine). */
+function fixedCard(fixed) {
+  return `<div class="card" id="fixedTarget">
+    <h2>Ablage</h2>
+    <div class="fname">${esc([archiveLabel(), ...fixed.rel].join(" / "))}</div>
+    ${fixed.note ? `<p class="muted small" style="margin:6px 0 0">${esc(fixed.note)}</p>` : ""}
+  </div>`;
+}
 
 registerScreen("review", screen);
