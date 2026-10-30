@@ -1,5 +1,5 @@
 /**
- * Gutscheine – reine Funktionen ohne Oberfläche (in tests/unit/vouchers.test.mjs abgedeckt):
+ * Gutscheine und Rabatte – reine Funktionen ohne Oberfläche (in tests/unit/vouchers.test.mjs abgedeckt):
  * Erkennen von Dokumenttyp und Ordner, Ergänzen der Konfiguration, Gültigkeit, Sortierung.
  */
 import { nextNumberedFolder } from "../../documents/naming.js";
@@ -11,14 +11,25 @@ export const USED_FOLDER = "Verbraucht";
 export const SOON_DAYS = 30;
 
 export const DOCTYPE = {
-  name: "Gutschein",
+  name: "Gutschein/Rabatt",
   short: "Gutschein",
-  hint: "Geschenkgutschein, Wertgutschein, Guthabenkarte, Gutscheincode",
+  hint: "Geschenkgutschein, Wertgutschein, Guthabenkarte, Gutscheincode, Rabattcode, Rabattaktion, Coupon",
   feature: FEATURE,
 };
+/** Fassung aus Version 2.2 – wird beim Start auf die aktuelle gebracht, solange sie unverändert ist. */
+const LEGACY_DOCTYPE = { name: "Gutschein", hint: "Geschenkgutschein, Wertgutschein, Guthabenkarte, Gutscheincode" };
+
+/** Art: Gutschein (Geldwert oder Leistung) oder Rabatt (Prozent/Betrag auf etwas) */
+export const KINDS = [
+  ["voucher", "Gutschein"],
+  ["discount", "Rabatt"],
+];
+export const isDiscount = (e) => e?.kind === "discount";
+/** Kürzel im Dateinamen für Rabatte (Gutscheine nutzen das Kürzel des Dokumenttyps) */
+export const DISCOUNT_SHORT = "Rabatt";
 const FOLDER_BASE = "Gutscheine";
 const FOLDER_DESCRIPTION =
-  "Offene Gutscheine (werden automatisch hier abgelegt). Eingelöste und abgelaufene Gutscheine liegen im Unterordner Verbraucht.";
+  "Offene Gutscheine und Rabatte (werden automatisch hier abgelegt). Eingelöste und abgelaufene liegen im Unterordner Verbraucht.";
 
 export const REDEEM = [
   ["online", "Online"],
@@ -55,9 +66,15 @@ export function setupStructure(st) {
   if (!dt) {
     st.doctypes.splice(Math.max(0, st.doctypes.length - 1), 0, { ...DOCTYPE });
     changed = true;
-  } else if (dt.feature !== FEATURE) {
-    dt.feature = FEATURE;
-    changed = true;
+  } else {
+    if (dt.feature !== FEATURE) {
+      dt.feature = FEATURE;
+      changed = true;
+    }
+    if (isLegacy(dt)) {
+      Object.assign(dt, { name: DOCTYPE.name, hint: DOCTYPE.hint });
+      changed = true;
+    }
   }
   let f = findFolder(st);
   if (!f) {
@@ -72,11 +89,15 @@ export function setupStructure(st) {
   return changed ? { ensure } : null;
 }
 
+// Unverändert aus 2.2 übernommener Typ: Name und Beschreibung auf die Fassung mit Rabatten bringen.
+// Hat jemand den Typ selbst umbenannt oder die Beschreibung geändert, bleibt er, wie er ist.
+const isLegacy = (dt) => dt.name === LEGACY_DOCTYPE.name && (dt.hint || "") === LEGACY_DOCTYPE.hint;
+
 /** Fehlt etwas in der Konfiguration? (ohne sie zu ändern) */
 export const needsSetup = (st) => {
   const d = findDoctype(st);
   const f = findFolder(st);
-  return !d || !f || d.feature !== FEATURE || f.feature !== FEATURE;
+  return !d || !f || d.feature !== FEATURE || f.feature !== FEATURE || isLegacy(d);
 };
 
 /** Gültigkeit als Text: "gültig bis 31.12.2026 · noch 12 Tage", "abgelaufen seit 3 Tagen" … */
@@ -100,11 +121,12 @@ export function validityState(iso, today = new Date()) {
 /** Sortierung der Liste: zuerst die, die am frühesten ablaufen; ohne Datum ans Ende. */
 export const byExpiry = (a, b) => (a.validUntil || "9999").localeCompare(b.validUntil || "9999") || a.created - b.created;
 
-/** Zusammenfassung für Kachel und Liste. */
+/** Zusammenfassung für Kachel und Liste (Summe nur über Gutscheine mit Geldwert, nicht über Rabatte). */
 export function summarize(list, today = new Date()) {
   return {
     count: list.length,
-    sum: list.reduce((s, e) => s + (Number(e.amount) || 0), 0),
+    discounts: list.filter(isDiscount).length,
+    sum: list.reduce((s, e) => s + (isDiscount(e) ? 0 : Number(e.amount) || 0), 0),
     soon: list.filter((e) => validityState(e.validUntil, today) === "soon").length,
     expired: list.filter((e) => validityState(e.validUntil, today) === "expired").length,
   };

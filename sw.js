@@ -11,7 +11,7 @@
  * Pflege: CACHE muss zur Version in js/core/config.js passen; SHELL muss alle Dateien der App
  * enthalten. Beides prüft tests/unit/release.test.mjs.
  */
-const CACHE = "dm-v2.2.0";
+const CACHE = "dm-v2.3.0";
 const SHARE_CACHE = "dm-share";
 const SHELL = [
   "./",

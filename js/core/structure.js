@@ -92,7 +92,26 @@ async function extendOnce(change) {
     apply(st);
     return true;
   }
-  return false;
+  throw new Error("Die Konfiguration wird gerade von einem anderen Gerät geändert.");
+}
+
+/**
+ * Für Funktionsmodule: fehlende Teile ergänzen und Fehler sichtbar machen. Scheitert es, versucht das Modul
+ * es beim nächsten Laden der Konfiguration (spätestens beim nächsten Start) erneut.
+ */
+export async function ensureFeatureSetup(label, change) {
+  if (!navigator.onLine) return false;
+  try {
+    return await extendStructure(change);
+  } catch (e) {
+    if (e instanceof od.AuthNeeded) {
+      S.authProblem = true;
+      return false;
+    }
+    console.warn(`Einrichtung ${label}`, e);
+    toast(`${label}: Einrichtung in OneDrive fehlgeschlagen (${errText(e)}). Wird beim nächsten Start erneut versucht.`, 8000);
+    return false;
+  }
 }
 
 /**

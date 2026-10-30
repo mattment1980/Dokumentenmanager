@@ -38,8 +38,12 @@ INVOICE = {"folder": "13_Anschaffungen & Garantien", "subfolder": "", "doctype":
 
 TODAY = datetime.date.today()
 iso = lambda days: (TODAY + datetime.timedelta(days=days)).isoformat()
-VOUCHER = {"folder": "00_Eingang", "subfolder": "", "doctype": "Gutschein", "sender": "Buchhandlung Muster", "title": "Geschenkgutschein", "letter_date": iso(-3), "confidence": 0.9, "reason": "Gutschein.",
+VOUCHER = {"folder": "00_Eingang", "subfolder": "", "doctype": "Gutschein/Rabatt", "sender": "Buchhandlung Muster", "title": "Geschenkgutschein", "letter_date": iso(-3), "confidence": 0.9, "reason": "Gutschein.",
            "gutschein": {"einloesbar_bei": "Buchhandlung Muster", "wofuer": "Einkauf", "betrag": 50, "code": "ABCD-1234", "pin": "9876", "gueltig_bis": iso(20), "einloesung": "beides"}}
+DISCOUNT = {"folder": "00_Eingang", "subfolder": "", "doctype": "Gutschein/Rabatt", "sender": "Sportladen", "title": "Herbstaktion", "letter_date": iso(-1), "confidence": 0.9, "reason": "Rabattaktion.",
+            "gutschein": {"art": "rabatt", "einloesbar_bei": "Sportladen", "rabatt": "20 %", "wofuer": "alle Fußballschuhe", "betrag": 99, "code": "HERBST20", "gueltig_bis": iso(40), "einloesung": "online"}}
+REDELIVERY = {"folder": "00_Eingang", "subfolder": "", "doctype": "Paketbenachrichtigung", "sender": "Hermes", "title": "Zustellversuch", "letter_date": iso(0), "confidence": 0.9, "reason": "Nicht angetroffen.",
+              "paket": {"dienstleister": "Hermes", "abholort": "", "adresse": "", "zustellversuch_am": iso(0), "abholbar_bis": "", "neuer_zustellversuch_am": iso(1), "code": "H123", "empfaenger": ""}}
 PARCEL = {"folder": "00_Eingang", "subfolder": "", "doctype": "Paketbenachrichtigung", "sender": "DHL", "title": "Paket abholen", "letter_date": iso(0), "confidence": 0.95, "reason": "Benachrichtigungskarte.",
           "paket": {"dienstleister": "DHL", "abholort": "Postfiliale", "adresse": "Hauptstr. 1, 12345 Musterstadt", "zustellversuch_am": iso(0), "abholbar_bis": iso(1), "code": "JJD000123", "empfaenger": "Testi"}}
 SPECIAL = [None]
@@ -291,7 +295,7 @@ with sync_playwright() as p:
     cfg = od(pg)["config"]
     dts = [d["name"] for d in cfg["doctypes"]]
     vf = [f for f in cfg["folders"] if f.get("feature") == "vouchers"]
-    check("Dokumenttyp Gutschein ergänzt (vor dem Auffangtyp)", "Gutschein" in dts and dts[-1] == "Information/Sonstiges", dts)
+    check("Dokumenttyp Gutschein/Rabatt ergänzt (vor dem Auffangtyp)", "Gutschein/Rabatt" in dts and dts[-1] == "Information/Sonstiges", dts)
     check("Hauptordner fortlaufend nummeriert (14_Gutscheine)", len(vf) == 1 and vf[0]["name"] == "14_Gutscheine", [f["name"] for f in cfg["folders"]])
     check("Unterordner Verbraucht angelegt", "14_Gutscheine/Verbraucht" in od(pg).get("folders", []))
     check("Startseite: Kachel 'Offene Gutscheine'", pg.is_visible("#tileVouchers") and "Keine offenen Gutscheine" in pg.inner_text("#tileVouchers"))
@@ -314,7 +318,8 @@ with sync_playwright() as p:
     pg.click("[data-act=home]"); pg.wait_for_selector("#tileVouchers")
     pg.set_input_files("#camInput", os.path.join(FX, "brief.jpg")); pg.wait_for_selector("#next", timeout=20000); pg.click("#next")
     pg.click("#direct"); pg.wait_for_selector("#save")
-    pg.click("#dt [data-v='Gutschein']"); pg.wait_for_selector("#vou")
+    pg.click("#dt [data-v='Gutschein/Rabatt']"); pg.wait_for_selector("#vou")
+    check("Standard: Art Gutschein", "on" in pg.get_attribute("#vouKind [data-k=voucher]", "class"))
     pg.fill("#sender", "Therme"); pg.fill("#title", "Wellness")
     check("Ohne Betrag und 'Wofür' kein Ablegen", pg.is_disabled("#save"))
     pg.fill("[data-v=what]", "Massage 60 Minuten")
@@ -341,6 +346,28 @@ with sync_playwright() as p:
     mv = od(pg)["moves"][-1]
     check("Benutzt: nach 14_Gutscheine/Verbraucht verschoben", mv["targetRel"] == "14_Gutscheine/Verbraucht" and "Eingelöst am" in mv["description"], mv)
     check("Liste danach mit 1 Gutschein", len(od(pg)["files"]["own:_Gutscheine.json"]["data"]["open"]) == 1 and pg.locator(".vou").count() == 1)
+
+    print("12b) Rabatt")
+    pg.click("[data-act=back]"); pg.wait_for_selector("#scan")
+    SPECIAL[0] = DISCOUNT
+    scan_with_ai(pg)
+    check("KI erkennt Rabatt: Art umgeschaltet, Felder Rabatt/Worauf", "on" in pg.get_attribute("#vouKind [data-k=discount]", "class") and pg.input_value("[data-v=discount]") == "20 %" and pg.input_value("[data-v=what]") == "alle Fußballschuhe" and not pg.query_selector("[data-v=amount]"))
+    check("Dateiname mit _Rabatt_", "_Sportladen_Rabatt_Herbstaktion.pdf" in pg.inner_text("#pv"), pg.inner_text("#pv"))
+    pg.screenshot(path=f"{SHOTS}/21_review_discount.png", full_page=True)
+    pg.fill("[data-v=discount]", ""); pg.wait_for_timeout(100)
+    check("Rabatt ohne Höhe wird nicht abgelegt", pg.is_disabled("#save"))
+    pg.fill("[data-v=discount]", "20 %")
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000)
+    SPECIAL[0] = None
+    e = [x for x in od(pg)["files"]["own:_Gutscheine.json"]["data"]["open"] if x["merchant"] == "Sportladen"][0]
+    check("Rabatt in der Liste: Art, Höhe, kein Betrag", e["kind"] == "discount" and e["discount"] == "20 %" and e["amount"] is None and e["code"] == "HERBST20", e)
+    pg.click("[data-act=home]"); pg.wait_for_selector("#tileVouchers"); pg.wait_for_timeout(200)
+    tile = pg.inner_text("#tileVouchers")
+    check("Kachel 'Gutscheine & Rabatte', Rabatt nicht in der Summe", "Gutscheine & Rabatte" in tile and "2 offen" in tile and "€" not in tile, tile)
+    pg.click("#tileVouchers"); pg.wait_for_selector(".vou", timeout=10000); pg.wait_for_timeout(300)
+    card = pg.locator(".vou", has_text="Sportladen")
+    check("Rabattkarte: Etikett, Höhe, worauf, ohne 'Teilweise'", "RABATT" in card.inner_text().upper() and "20 %" in card.inner_text() and "auf alle Fußballschuhe" in card.inner_text() and card.locator("[data-part]").count() == 0)
+    pg.screenshot(path=f"{SHOTS}/22_vouchers_discount.png", full_page=True)
 
     print("13) Paketbenachrichtigungen: ablegen, Box, Zettel zeigen, abgeholt")
     pg.click("[data-act=back]"); pg.wait_for_selector("#scan"); pg.wait_for_timeout(200)
@@ -375,6 +402,22 @@ with sync_playwright() as p:
     check("Abgeholt: Datei gelöscht (Papierkorb)", od(pg)["deleted"] == [e["file"]["id"]])
     check("Abgeholt: Box verschwindet", not pg.query_selector("#parcelBox") and od(pg)["files"]["own:_Paketbenachrichtigungen.json"]["data"]["open"] == [])
 
+    print("13b) Neuer Zustellversuch (ohne Abholort)")
+    SPECIAL[0] = REDELIVERY
+    n_ai = len(ai_calls)
+    scan_with_ai(pg)
+    check("KI-Regel: Benachrichtigungskarten immer Paketbenachrichtigung", "IMMER den Dokumenttyp Paketbenachrichtigung" in ai_calls[n_ai]["system"])
+    check("Typbeschreibung nennt 'nicht angetroffen'", "nicht angetroffen" in ai_calls[n_ai]["system"])
+    check("Feld 'Neuer Zustellversuch am' vorbelegt", pg.input_value("[data-q=redelivery]") == iso(1))
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000)
+    SPECIAL[0] = None
+    pg.click("[data-act=home]"); pg.wait_for_selector("#parcelBox"); pg.wait_for_timeout(200)
+    check("Box zeigt 'neuer Zustellversuch'", "Hermes" in pg.inner_text("#parcelBox") and "neuer Zustellversuch am" in pg.inner_text("#parcelBox"), pg.inner_text("#parcelBox"))
+    pg.click("[data-parcel]"); pg.wait_for_selector("#done")
+    check("Knopf heißt 'Erledigt'", "Erledigt" in pg.inner_text("#done"))
+    pg.click("#done"); pg.wait_for_selector("#scan", timeout=10000); pg.wait_for_timeout(300)
+    check("Erledigt: Box verschwindet", not pg.query_selector("#parcelBox"))
+
     print("14) Funktionen an- und abschalten")
     pg.click("[data-act=settings]"); pg.wait_for_selector("#features")
     check("Drei Funktionen mit Schalter, alle an", pg.locator("[data-feature]").count() == 3 and all(pg.is_checked(f"[data-feature={f}]") for f in ("invoices", "vouchers", "parcels")))
@@ -385,8 +428,8 @@ with sync_playwright() as p:
     check("Kachel Gutscheine ausgeblendet", not pg.query_selector("#tileVouchers") and pg.query_selector("#tileInvoices"))
     n_ai = len(ai_calls)
     scan_with_ai(pg)
-    check("Abgeschaltet: KI ohne Gutscheinfelder und -typ", "gutschein" not in ai_calls[n_ai]["tools"][0]["input_schema"]["properties"] and "Gutschein" not in ai_calls[n_ai]["tools"][0]["input_schema"]["properties"]["doctype"]["enum"])
-    check("Abgeschaltet: Dokumenttyp nicht wählbar", not pg.query_selector("#dt [data-v='Gutschein']") and pg.query_selector("#dt [data-v='Paketbenachrichtigung']"))
+    check("Abgeschaltet: KI ohne Gutscheinfelder und -typ", "gutschein" not in ai_calls[n_ai]["tools"][0]["input_schema"]["properties"] and "Gutschein/Rabatt" not in ai_calls[n_ai]["tools"][0]["input_schema"]["properties"]["doctype"]["enum"])
+    check("Abgeschaltet: Dokumenttyp nicht wählbar", not pg.query_selector("#dt [data-v='Gutschein/Rabatt']") and pg.query_selector("#dt [data-v='Paketbenachrichtigung']"))
     while not pg.query_selector("#discard"):
         pg.click("[data-act=back]"); pg.wait_for_timeout(150)
     pg.click("#discard")
@@ -395,7 +438,7 @@ with sync_playwright() as p:
     cfg = od(pg)["config"]
     check("Wieder eingeschaltet, Ordner nicht doppelt", cfg["features"]["vouchers"] is True and len([f for f in cfg["folders"] if "Gutscheine" in f["name"]]) == 1)
     pg.click("[data-act=back]"); pg.wait_for_selector("#tileVouchers")
-    check("Kachel wieder da, Liste unverändert", "1 offen" in pg.inner_text("#tileVouchers"))
+    check("Kachel wieder da, Liste unverändert", "2 offen" in pg.inner_text("#tileVouchers"))
 
     # Desktop-Ansicht der Startseite
     pg.set_viewport_size({"width": 1280, "height": 800}); pg.wait_for_selector("#scan"); pg.wait_for_timeout(300)

@@ -48,7 +48,7 @@ js/
       index.js            Anmeldung an den Erweiterungspunkten, Aktionen (markPaid …)
       register.js         gemeinsame Liste in OneDrive (_Offene-Rechnungen.json), konfliktsicher
       payment.js          IBAN-Prüfung, Fälligkeit (reine Funktionen)
-    vouchers/           Gutscheine: eigener Hauptordner, offene Liste, Benutzt/Teilweise/Abgelaufen
+    vouchers/           Gutscheine & Rabatte: eigener Hauptordner, offene Liste, Benutzt/Teilweise/Abgelaufen
       index.js            Anmeldung an den Erweiterungspunkten, Aktionen (retire, redeemPartly …)
       model.js            Konfiguration ergänzen, Gültigkeit, Sortierung (reine Funktionen)
     parcels/            Paketbenachrichtigungen: Box auf der Startseite, Zettel zeigen, Abgeholt = löschen
@@ -139,7 +139,10 @@ Abgeschaltet heißt: KI-Felder, Prüfen-Abschnitte, Ablage-Filter und Startseite
 Listen in OneDrive bleiben erhalten. Bedienung: Einstellungen → „Funktionen“.
 
 Braucht ein Modul Dokumenttypen oder Ordner, ergänzt es sie selbst beim Ereignis `config:loaded` über
-`extendStructure()` (liest die aktuelle Konfiguration, schreibt konfliktsicher, nacheinander). Die Teile tragen
+`ensureFeatureSetup()` bzw. `extendStructure()` (liest die aktuelle Konfiguration, schreibt konfliktsicher,
+nacheinander; Fehler werden angezeigt und beim nächsten Start erneut versucht). Ändert eine neue Version Name oder
+Beschreibung eines Modul-Typs, wird die alte Fassung nur ersetzt, wenn sie unverändert ist (siehe `LEGACY_*` in
+den `model.js`). Die Teile tragen
 `feature: "<id>"`, damit sie auch nach Umbenennen erkannt werden. Wer den Typ „Gutschein“ loswerden will, schaltet
 das Modul ab – bei eingeschaltetem Modul wird er sonst wieder ergänzt.
 
@@ -148,7 +151,7 @@ das Modul ab – bei eingeschaltetem Modul wird er sonst wieder ergänzt.
 | Datei im Archivordner | Modul | Inhalt |
 |-----------------------|-------|--------|
 | `_Offene-Rechnungen.json` | invoices | offene Rechnungen, bekannte IBANs je Empfänger |
-| `_Gutscheine.json` | vouchers | offene Gutscheine (Händler, Betrag, Code, PIN, Ablauf, Verlauf „teilweise“) |
+| `_Gutscheine.json` | vouchers | offene Gutscheine und Rabatte (`kind`: voucher/discount; Händler, Betrag bzw. Rabatt, Code, PIN, Ablauf, Verlauf „teilweise“) |
 | `_Paketbenachrichtigungen.json` | parcels | offene Abholzettel samt Vorschaubild (JPEG, ≤ 450 KB) |
 
 Gutscheine und Pakete nutzen `core/sharedlist.js` (gleiches Verfahren wie die Rechnungsliste: lesen mit

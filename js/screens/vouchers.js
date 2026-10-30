@@ -1,13 +1,14 @@
 /**
- * Bildschirm "vouchers": Liste der offenen Gutscheine (Funktionsmodul js/features/vouchers/).
- * Sortiert nach Ablaufdatum; je Eintrag Code/PIN zum Kopieren, „Benutzt“, „Teilweise eingelöst“, „Abgelaufen“.
+ * Bildschirm "vouchers": Liste der offenen Gutscheine und Rabatte (Funktionsmodul js/features/vouchers/).
+ * Sortiert nach Ablaufdatum; je Eintrag Code/PIN zum Kopieren, „Benutzt“, „Teilweise eingelöst“ (nur Gutscheine
+ * mit Betrag), „Abgelaufen“. Mehrfach nutzbare Rabattcodes bleiben einfach in der Liste, bis sie ablaufen.
  */
 import { registerScreen, isCurrent, render } from "../core/router.js";
 import { app, $, $$, esc, topbar, toast, busy, unbusy, copyText, errText } from "../core/ui.js";
 import { I } from "../core/icons.js";
 import { on } from "../core/events.js";
 import { list, retire, redeemPartly, removeEntry } from "../features/vouchers/index.js";
-import { byExpiry, summarize, validityText, validityState, redeemLabel, checkRest, USED_FOLDER } from "../features/vouchers/model.js";
+import { byExpiry, summarize, validityText, validityState, redeemLabel, checkRest, isDiscount, USED_FOLDER } from "../features/vouchers/model.js";
 import { formatAmount, isoToDe } from "../documents/values.js";
 
 let loading = false;
@@ -27,10 +28,10 @@ registerScreen("vouchers", {
     const items = [...list.current().open].sort(byExpiry);
     const s = summarize(items);
     const sub = s.count ? `${s.count} offen${s.sum ? ` · ${formatAmount(s.sum)}` : ""}` : "";
-    app.innerHTML = `${topbar("Offene Gutscheine", { sub: loading ? (sub ? sub + " · wird aktualisiert …" : "wird geladen …") : sub })}
-      ${!items.length ? `<div class="center"><span class="ic big ok">${I.check}</span><p class="muted">Keine offenen Gutscheine.</p></div>` : ""}
+    app.innerHTML = `${topbar("Gutscheine & Rabatte", { sub: loading ? (sub ? sub + " · wird aktualisiert …" : "wird geladen …") : sub })}
+      ${!items.length ? `<div class="center"><span class="ic big ok">${I.check}</span><p class="muted">Keine offenen Gutscheine oder Rabatte.</p></div>` : ""}
       ${items.map(card).join("")}
-      ${items.length ? `<p class="muted small">„Benutzt“ und „Abgelaufen“ verschieben den Gutschein in den Unterordner ${esc(USED_FOLDER)}.</p>` : ""}`;
+      ${items.length ? `<p class="muted small">„Benutzt“ und „Abgelaufen“ verschieben in den Unterordner ${esc(USED_FOLDER)}. Mehrfach nutzbare Rabattcodes einfach stehen lassen.</p>` : ""}`;
 
     const find = (id) => items.find((x) => x.id === id);
     $$("[data-copy]").forEach((b) => (b.onclick = () => copyText(b.dataset.copy)));
@@ -52,14 +53,17 @@ const copyBtn = (v, label) => `<button class="iconbtn copybtn" data-copy="${esc(
 function card(e) {
   const state = validityState(e.validUntil);
   const color = state === "expired" ? "errtext" : state === "soon" ? "warntext" : "";
-  const hasAmount = e.amount !== null && e.amount !== undefined && e.amount !== "";
-  const details = [hasAmount && e.what ? e.what : "", redeemLabel(e.redeem)].filter(Boolean).join(" · ");
+  const disc = isDiscount(e);
+  const hasAmount = !disc && e.amount !== null && e.amount !== undefined && e.amount !== "";
+  // Rechte Spalte: Rabatt-Höhe, Geldwert oder Leistung; darunter, was sonst noch wichtig ist
+  const value = disc ? e.discount : hasAmount ? formatAmount(e.amount) : e.what || "";
+  const details = [disc && e.what ? `auf ${e.what}` : hasAmount && e.what ? e.what : "", redeemLabel(e.redeem)].filter(Boolean).join(" · ");
   return `<div class="card inv vou ${state}" data-id="${esc(e.id)}">
     <div class="invhead">
-      <div class="grow"><div class="fname">${esc(e.merchant)}</div>
+      <div class="grow"><div class="fname">${disc ? `<span class="tag">Rabatt</span>` : ""}${esc(e.merchant)}</div>
         <div class="path ${color}">${esc(validityText(e.validUntil))}${e.validUntil ? ` (bis ${esc(isoToDe(e.validUntil))})` : ""}</div>
         ${details ? `<div class="path">${esc(details)}</div>` : ""}</div>
-      <div class="amount">${hasAmount ? esc(formatAmount(e.amount)) : esc(e.what || "")}</div>
+      <div class="amount">${esc(value)}</div>
     </div>
     ${e.code || e.pin ? `<dl class="kv paykv">
       ${e.code ? `<dt>Code</dt><dd><span class="mono">${esc(e.code)}</span>${copyBtn(e.code, "Code")}</dd>` : ""}
@@ -89,9 +93,9 @@ function card(e) {
 
 async function doRetire(e, reason) {
   if (!e) return;
-  const what = `${e.merchant}${e.amount ? ` (${formatAmount(e.amount)})` : ""}`;
+  const what = `${isDiscount(e) ? "Rabatt " : ""}${e.merchant}${isDiscount(e) ? (e.discount ? ` (${e.discount})` : "") : e.amount ? ` (${formatAmount(e.amount)})` : ""}`;
   const q = reason === "expired" ? `${what} als abgelaufen aussortieren?` : `${what} als benutzt markieren?`;
-  if (!confirm(`${q}\n\nDer Gutschein wird in den Unterordner „${USED_FOLDER}“ verschoben.`)) return;
+  if (!confirm(`${q}\n\nEr wird in den Unterordner „${USED_FOLDER}“ verschoben.`)) return;
   busy("Wird verschoben …");
   try {
     await retire(e, reason);

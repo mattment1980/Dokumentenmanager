@@ -9,9 +9,13 @@ export const SUBFOLDER = "Paketbenachrichtigungen";
 export const DOCTYPE = {
   name: "Paketbenachrichtigung",
   short: "Paket",
-  hint: "Benachrichtigung über ein Paket zum Abholen (Filiale, Packstation, Paketshop, Nachbar)",
+  hint:
+    "Benachrichtigungskarte eines Paketdienstes: Empfänger nicht angetroffen, Zustellversuch fehlgeschlagen, " +
+    "Paket zum Abholen (Filiale, Packstation, Paketshop), beim Nachbarn abgegeben oder neuer Zustellversuch",
   feature: FEATURE,
 };
+/** Beschreibung aus Version 2.2 – wird beim Start ersetzt, solange sie unverändert ist. */
+const LEGACY_HINT = "Benachrichtigung über ein Paket zum Abholen (Filiale, Packstation, Paketshop, Nachbar)";
 
 export const findDoctype = (st) =>
   st.doctypes.find((d) => d.feature === FEATURE) || st.doctypes.find((d) => /^paket/i.test(d.name));
@@ -28,14 +32,31 @@ export function setupStructure(st) {
     st.doctypes.splice(Math.max(0, st.doctypes.length - 1), 0, { ...DOCTYPE });
     return { ensure: [] };
   }
+  let changed = false;
   if (dt.feature !== FEATURE) {
     dt.feature = FEATURE;
-    return { ensure: [] };
+    changed = true;
   }
-  return null;
+  if ((dt.hint || "") === LEGACY_HINT) {
+    dt.hint = DOCTYPE.hint;
+    changed = true;
+  }
+  return changed ? { ensure: [] } : null;
 }
 
-export const needsSetup = (st) => findDoctype(st)?.feature !== FEATURE;
+export const needsSetup = (st) => {
+  const dt = findDoctype(st);
+  return !dt || dt.feature !== FEATURE || (dt.hint || "") === LEGACY_HINT;
+};
+
+/** Muss man das Paket irgendwo abholen? Ohne Abholort: nur ein neuer Zustellversuch angekündigt. */
+export const needsPickup = (e) => !!String(e?.location || "").trim() || !!String(e?.address || "").trim();
+
+/** Statuszeile für Box und Detail. */
+export function statusText(e, today = new Date()) {
+  if (!needsPickup(e)) return e.redelivery ? `neuer Zustellversuch am ${shortDateDe(e.redelivery)}` : "neuer Zustellversuch";
+  return pickupText(e.until, today);
+}
 
 /** Frist als Text: "abholbar bis Sa 07.11. · noch 3 Tage", "heute letzter Tag", "Frist abgelaufen" */
 export function pickupText(iso, today = new Date()) {

@@ -1,11 +1,12 @@
 /**
- * Funktionsmodul "Gutscheine": eigener Hauptordner, Liste offener Gutscheine, „Benutzt“.
+ * Funktionsmodul "Gutscheine & Rabatte": eigener Hauptordner, Liste offener Gutscheine und Rabatte, „Benutzt“.
  *
  * Ablauf
  *   1. Neuer Dokumenttyp „Gutschein“ und Hauptordner (fortlaufend nummeriert, z. B. 15_Gutscheine).
  *      Beides wird beim ersten Laden der Konfiguration ergänzt, falls es fehlt (model.js → setupStructure).
- *   2. Dokumenttyp Gutschein → Prüfen-Bildschirm zeigt die Gutscheindaten; die KI füllt sie vor
- *      (KI-Feld "gutschein"). Der Ablageort ist fest: der Gutscheinordner.
+ *   2. Dokumenttyp Gutschein/Rabatt → Prüfen-Bildschirm fragt „Gutschein | Rabatt“ und zeigt die passenden
+ *      Felder; die KI füllt sie vor (KI-Feld "gutschein"). Der Ablageort ist fest: der Gutscheinordner.
+ *      Rabatte heißen im Dateinamen "…_Rabatt_…", zählen nicht zur Euro-Summe und haben kein „Teilweise“.
  *   3. Nach dem Hochladen (Ereignis "queue:uploaded") kommt der Gutschein in die gemeinsame Liste
  *      <Archiv>/_Gutscheine.json.
  *   4. Liste (screens/vouchers.js):
@@ -20,20 +21,20 @@ import { on } from "../../core/events.js";
 import { go } from "../../core/router.js";
 import { registerFeature, isEnabled } from "../../core/features.js";
 import { registerAiField, registerDraftInit, registerReviewSection, registerSaveFilter, registerHomeSection } from "../../core/extensions.js";
-import { extendStructure } from "../../core/structure.js";
+import { ensureFeatureSetup } from "../../core/structure.js";
 import { sharedList, newId, createdByFrom } from "../../core/sharedlist.js";
 import { history } from "../../services/storage.js";
 import * as od from "../../services/onedrive.js";
-import { isValidIsoDate, todayIso } from "../../documents/naming.js";
+import { isValidIsoDate, todayIso, buildFileName } from "../../documents/naming.js";
 import { parseAmount, formatAmount, plainAmount } from "../../documents/values.js";
 import {
-  FEATURE, USED_FOLDER, REDEEM, isVoucherType, folderName, setupStructure, needsSetup, summarize,
+  FEATURE, USED_FOLDER, REDEEM, KINDS, DISCOUNT_SHORT, isVoucherType, folderName, setupStructure, needsSetup, summarize,
 } from "./model.js";
 
 registerFeature({
   id: FEATURE,
-  label: "Gutscheine",
-  description: "Gutscheine im eigenen Ordner ablegen, Liste der offenen Gutscheine mit Code und Ablaufdatum, „Benutzt“.",
+  label: "Gutscheine & Rabatte",
+  description: "Gutscheine und Rabattaktionen im eigenen Ordner ablegen, Liste mit Code und Ablaufdatum, „Benutzt“.",
 });
 
 export const list = sharedList({ file: "_Gutscheine.json", cacheKey: "vouchers", event: "vouchers:changed", label: "Gutscheinliste" });
@@ -43,7 +44,7 @@ const applies = (job, d) => isVoucherType(S.structure, d.doctype);
 // ---------- 1. Entwurf und KI ----------
 
 registerDraftInit((d) => {
-  d.voucher = { merchant: "", what: "", amount: "", code: "", pin: "", validUntil: "", redeem: "" };
+  d.voucher = { kind: "voucher", merchant: "", what: "", amount: "", discount: "", code: "", pin: "", validUntil: "", redeem: "" };
 });
 
 registerAiField({
@@ -51,9 +52,11 @@ registerAiField({
   name: "gutschein",
   schema: {
     type: "object",
-    description: "Nur bei Gutscheinen ausfüllen.",
+    description: "Nur bei Gutscheinen und Rabatten ausfüllen.",
     properties: {
+      art: { type: "string", enum: ["gutschein", "rabatt"] },
       einloesbar_bei: { type: "string" },
+      rabatt: { type: "string" },
       wofuer: { type: "string" },
       betrag: { type: "number" },
       code: { type: "string" },
@@ -63,19 +66,26 @@ registerAiField({
     },
   },
   rule:
-    "nur beim Dokumenttyp Gutschein, sonst weglassen. einloesbar_bei = Händler oder Dienstleister, bei dem der Gutschein " +
-    "eingelöst wird, kurz (wie sender); wofuer = wofür er gilt, 1 bis 5 Wörter (z. B. 'Einkauf', 'Massage 60 Minuten', " +
-    "'Abendessen für 2'); betrag = Wert in Euro, nur wenn ein Geldbetrag genannt ist; code = Gutscheincode bzw. " +
+    "nur beim Dokumenttyp für Gutscheine und Rabatte, sonst weglassen. art = gutschein, wenn er einen Geldwert oder eine " +
+    "Leistung verschenkt bzw. gutschreibt; rabatt bei Rabattaktionen, Rabatt- oder Aktionscodes, Coupons und Prozent-Angeboten. " +
+    "einloesbar_bei = Händler oder Dienstleister, bei dem eingelöst wird, kurz (wie sender); " +
+    "wofuer = beim Gutschein, wofür er gilt, 1 bis 5 Wörter (z. B. 'Einkauf', 'Massage 60 Minuten', 'Abendessen für 2'); " +
+    "beim Rabatt, worauf er gilt, mit Bedingungen kurz (z. B. 'alles außer Bücher, ab 50 € Einkauf'); " +
+    "rabatt = nur beim Rabatt die Höhe kurz (z. B. '20 %', '10 €', '2 für 1'); " +
+    "betrag = nur beim Gutschein der Wert in Euro, wenn ein Geldbetrag genannt ist; code = Gutschein- bzw. Rabattcode oder " +
     "Gutscheinnummer exakt wie gedruckt; pin = PIN oder Sicherheitscode, falls vorhanden; gueltig_bis = Ablaufdatum " +
     "JJJJ-MM-TT, nur wenn auf dem Gutschein angegeben (nicht schätzen), sonst leer; einloesung = online, vor_ort oder beides, " +
     "wenn erkennbar, sonst leer.",
   apply(d, v) {
     if (!v || typeof v !== "object") return;
     const amount = parseAmount(v.betrag);
+    const discount = v.art === "rabatt";
     Object.assign(d.voucher, {
+      kind: discount ? "discount" : "voucher",
       merchant: String(v.einloesbar_bei || "").trim() || d.sender,
       what: String(v.wofuer || "").trim(),
-      amount: amount !== null && amount > 0 ? plainAmount(amount) : "",
+      amount: !discount && amount !== null && amount > 0 ? plainAmount(amount) : "",
+      discount: discount ? String(v.rabatt || "").trim() : "",
       code: String(v.code || "").trim(),
       pin: String(v.pin || "").trim(),
       validUntil: isValidIsoDate(v.gueltig_bis) ? v.gueltig_bis : "",
@@ -91,17 +101,25 @@ registerReviewSection({
   id: "voucher",
   applies,
   target: () => [folderName(S.structure)],
-  targetNote: "Gutscheine werden immer hier abgelegt und erscheinen in der Liste „Offene Gutscheine“.",
+  targetNote: "Gutscheine und Rabatte werden immer hier abgelegt und erscheinen in der Liste „Gutscheine & Rabatte“.",
   render(job, d) {
     const v = d.voucher;
+    const disc = v.kind === "discount";
     return `<div class="card" id="vou">
-      <h2>Gutschein</h2>
+      <h2>Gutschein oder Rabatt?</h2>
+      <div class="seg" id="vouKind" style="margin-bottom:14px">${KINDS.map(([k, l]) => `<button data-k="${k}" class="${v.kind === k ? "on" : ""}">${l}</button>`).join("")}</div>
       <label class="field"><span>Einlösbar bei</span><input type="text" data-v="merchant" value="${esc(v.merchant)}" placeholder="${esc(d.sender || "z. B. Buchhandlung, Therme")}" autocomplete="off"></label>
+      ${disc ? `
+      <div class="row">
+        <label class="field grow"><span>Rabatt</span><input type="text" data-v="discount" value="${esc(v.discount)}" placeholder="z. B. 20 % oder 10 €" autocomplete="off"></label>
+        <label class="field grow"><span>Gültig bis</span><input type="date" data-v="validUntil" value="${esc(v.validUntil)}"></label>
+      </div>
+      <label class="field"><span>Worauf</span><input type="text" data-v="what" value="${esc(v.what)}" placeholder="z. B. alles außer Bücher, ab 50 € Einkauf" autocomplete="off"></label>` : `
       <label class="field"><span>Wofür</span><input type="text" data-v="what" value="${esc(v.what)}" placeholder="z. B. Einkauf, Massage 60 Minuten" autocomplete="off"></label>
       <div class="row">
         <label class="field grow"><span>Betrag (€)</span><input type="text" data-v="amount" value="${esc(v.amount)}" inputmode="decimal" placeholder="leer bei Leistung" autocomplete="off"></label>
         <label class="field grow"><span>Gültig bis</span><input type="date" data-v="validUntil" value="${esc(v.validUntil)}"></label>
-      </div>
+      </div>`}
       <div class="row">
         <label class="field grow"><span>Code</span><input type="text" data-v="code" value="${esc(v.code)}" autocomplete="off" spellcheck="false"></label>
         <label class="field grow"><span>PIN</span><input type="text" data-v="pin" value="${esc(v.pin)}" autocomplete="off" spellcheck="false"></label>
@@ -111,6 +129,12 @@ registerReviewSection({
     </div>`;
   },
   bind(root, job, d, rerender, refresh) {
+    root.querySelector("#vouKind").onclick = (e) => {
+      const b = e.target.closest("[data-k]");
+      if (!b || d.voucher.kind === b.dataset.k) return;
+      d.voucher.kind = b.dataset.k;
+      rerender();
+    };
     root.querySelector("#vouRedeem").onclick = (e) => {
       const b = e.target.closest("[data-r]");
       if (!b) return;
@@ -127,6 +151,8 @@ registerReviewSection({
   validate(job, d) {
     const v = d.voucher;
     if (!String(v.merchant || d.sender).trim()) return "Bitte eintragen, wo der Gutschein einlösbar ist.";
+    if (v.validUntil && !isValidIsoDate(v.validUntil)) return "Bitte gültiges Ablaufdatum eingeben.";
+    if (v.kind === "discount") return String(v.discount).trim() ? "" : "Bitte die Höhe des Rabatts eintragen (z. B. 20 %).";
     if (String(v.amount).trim()) {
       const a = parseAmount(v.amount);
       if (a === null || a <= 0) return "Bitte gültigen Betrag eintragen (oder leer lassen).";
@@ -144,12 +170,17 @@ registerSaveFilter(
     const d = plan.draft;
     if (!isVoucherType(S.structure, d.doctype)) return;
     const v = d.voucher;
+    const disc = v.kind === "discount";
+    // Rabatte heißen im Dateinamen "Rabatt" statt "Gutschein"
+    if (disc) plan.fileName = buildFileName({ date: d.date, sender: d.sender, doctypeShort: DISCOUNT_SHORT, title: d.title, ext: plan.job.ext });
     const description = plan.description;
-    plan.description += " · Gutschein offen";
+    plan.description += disc ? " · Rabatt offen" : " · Gutschein offen";
     plan.meta.voucher = {
+      kind: disc ? "discount" : "voucher",
       merchant: String(v.merchant || "").trim() || String(d.sender).trim(),
       what: String(v.what || "").trim(),
-      amount: String(v.amount).trim() ? parseAmount(v.amount) : null,
+      amount: !disc && String(v.amount).trim() ? parseAmount(v.amount) : null,
+      discount: disc ? String(v.discount || "").trim() : "",
       code: String(v.code || "").trim(),
       pin: String(v.pin || "").trim(),
       validUntil: v.validUntil || "",
@@ -189,13 +220,8 @@ on("config:loaded", async (st) => {
   if (!isEnabled(FEATURE, st)) return;
   if (S.account && !S.configMissing && needsSetup(st) && !settingUp) {
     settingUp = true;
-    try {
-      await extendStructure(setupStructure);
-    } catch (e) {
-      console.warn("Gutscheinordner konnte nicht eingerichtet werden", e);
-    } finally {
-      settingUp = false;
-    }
+    await ensureFeatureSetup("Gutscheine & Rabatte", setupStructure);
+    settingUp = false;
   }
   list.refresh();
 });
@@ -250,7 +276,7 @@ registerHomeSection({
     const s = summarize(list.current().open);
     const notes = [s.soon ? `${s.soon} läuft bald ab` : "", s.expired ? `${s.expired} abgelaufen` : ""].filter(Boolean);
     return `<button class="tile ${s.soon || s.expired ? "warnsoft" : ""} ${s.count ? "" : "quiet"}" id="tileVouchers">
-      <span class="grow"><b>Offene Gutscheine</b><span class="path">${s.count ? `${s.count} offen${notes.length ? " · " + notes.join(" · ") : ""}` : "Keine offenen Gutscheine"}</span></span>
+      <span class="grow"><b>Gutscheine & Rabatte</b><span class="path">${s.count ? `${s.count} offen${notes.length ? " · " + notes.join(" · ") : ""}` : "Keine offenen Gutscheine oder Rabatte"}</span></span>
       ${s.sum ? `<span class="amount">${esc(formatAmount(s.sum))}</span>` : ""}
     </button>`;
   },

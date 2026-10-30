@@ -24,16 +24,18 @@ Optimiert für Chrome auf Android, nutzbar auch am Desktop.
 - **Überwiesen** verschiebt die Rechnung mit dem Vermerk „bezahlt“ in ihren Ordner
 - IBAN-Prüfung und Warnung bei geänderter Bankverbindung eines Empfängers
 
-**Gutscheine**
+**Gutscheine & Rabatte**
 - Eigener Hauptordner (fortlaufend nummeriert, z. B. `15_Gutscheine`), wird bei Bedarf automatisch angelegt
-- Liste **Offene Gutscheine**: Händler, Wofür, Betrag, Code und PIN zum Kopieren, Ablaufdatum
+- Auswahl *Gutschein | Rabatt*; Rabatte mit Höhe (z. B. „20 %“) und „Worauf“, Dateiname `…_Rabatt_…`
+- Liste **Gutscheine & Rabatte**: Händler, Wofür, Betrag, Code und PIN zum Kopieren, Ablaufdatum
   (sortiert, hervorgehoben ab 30 Tagen vor Ablauf)
 - **Benutzt** bzw. **Abgelaufen** verschiebt nach `Verbraucht`, **Teilweise** speichert den Restbetrag
 
 **Paketbenachrichtigungen**
-- Box **Pakete abholen** auf der Startseite (nur, wenn etwas offen ist): Dienstleister, Abholort, Frist, Für wen
+- Box **Pakete** auf der Startseite (nur, wenn etwas offen ist): Dienstleister, Abholort, Frist, Für wen –
+  bei Zetteln ohne Abholort „neuer Zustellversuch“ und „Erledigt“
 - Antippen zeigt den Zettel bildschirmfüllend (Barcode zum Vorzeigen), Abholort mit Kartenlink, Code zum Kopieren
-- **Abgeholt** löscht den Zettel (landet im OneDrive-Papierkorb)
+- **Abgeholt** bzw. **Erledigt** löscht den Zettel (landet im OneDrive-Papierkorb)
 
 Rechnungen, Gutscheine und Pakete lassen sich unter Einstellungen → **Funktionen** einzeln abschalten
 (gilt für alle Nutzer des Archivs; Dateien und Listen bleiben erhalten).

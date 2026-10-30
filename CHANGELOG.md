@@ -1,5 +1,24 @@
 # Änderungen
 
+## 2.3.0 – Rabatte, Paketzettel besser erkannt
+
+**Neu**
+- Rabattaktionen: Dokumenttyp heißt jetzt „Gutschein/Rabatt“; im Prüfen-Bildschirm Auswahl *Gutschein | Rabatt*
+  - Rabatt: Höhe (z. B. „20 %“), Worauf, Händler, Code, Gültig bis, Einlösung; Dateiname `…_Rabatt_…`
+  - In der Liste mit Etikett „Rabatt“, ohne „Teilweise“, nicht in der Euro-Summe
+  - Liste und Kachel heißen „Gutscheine & Rabatte“; mehrfach nutzbare Codes bleiben einfach stehen
+- Paketbenachrichtigungen
+  - KI ordnet jede Benachrichtigungskarte eines Paketdienstes als Paketbenachrichtigung ein (nicht angetroffen,
+    Filiale/Packstation, beim Nachbarn, neuer Zustellversuch)
+  - Zettel ohne Abholort: Box zeigt „neuer Zustellversuch (am …)“, Knopf „Erledigt“
+  - Box auf der Startseite heißt „Pakete“
+
+**Korrekturen**
+- Scheitert das automatische Ergänzen von Dokumenttypen/Ordnern in OneDrive, erscheint ein Hinweis; beim
+  nächsten Start wird es erneut versucht (bisher still)
+- Unverändert übernommene Typen aus 2.2 („Gutschein“, „Paketbenachrichtigung“) werden auf die neue Beschreibung
+  gebracht; selbst angepasste Typen bleiben unberührt
+
 ## 2.2.0 – Gutscheine, Paketbenachrichtigungen, Funktionsschalter
 
 **Neu**

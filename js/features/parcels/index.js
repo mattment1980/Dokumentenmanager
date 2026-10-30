@@ -21,12 +21,12 @@ import { on } from "../../core/events.js";
 import { go } from "../../core/router.js";
 import { registerFeature, isEnabled } from "../../core/features.js";
 import { registerAiField, registerDraftInit, registerReviewSection, registerSaveFilter, registerSavePrepare, registerHomeSection } from "../../core/extensions.js";
-import { extendStructure } from "../../core/structure.js";
+import { ensureFeatureSetup } from "../../core/structure.js";
 import { sharedList, newId, createdByFrom } from "../../core/sharedlist.js";
 import * as od from "../../services/onedrive.js";
 import { isValidIsoDate } from "../../documents/naming.js";
 import { canvasToJpeg } from "../../documents/scan.js";
-import { FEATURE, SUBFOLDER, isParcelType, setupStructure, needsSetup, pickupText, pickupState, byDeadline, jpegDataUrl } from "./model.js";
+import { FEATURE, SUBFOLDER, isParcelType, setupStructure, needsSetup, statusText, pickupState, needsPickup, byDeadline, jpegDataUrl } from "./model.js";
 
 registerFeature({
   id: FEATURE,
@@ -54,7 +54,7 @@ export function openParcel(id) {
 // ---------- 1. Entwurf und KI ----------
 
 registerDraftInit((d) => {
-  d.parcel = { carrier: "", location: "", address: "", attempted: "", until: "", code: "", recipient: "" };
+  d.parcel = { carrier: "", location: "", address: "", attempted: "", until: "", redelivery: "", code: "", recipient: "" };
 });
 
 registerAiField({
@@ -69,16 +69,21 @@ registerAiField({
       adresse: { type: "string" },
       zustellversuch_am: { type: "string", description: "JJJJ-MM-TT oder leer" },
       abholbar_bis: { type: "string", description: "JJJJ-MM-TT oder leer" },
+      neuer_zustellversuch_am: { type: "string", description: "JJJJ-MM-TT oder leer" },
       code: { type: "string" },
       empfaenger: { type: "string" },
     },
   },
   rule:
-    "nur beim Dokumenttyp Paketbenachrichtigung, sonst weglassen. dienstleister = Paketdienst kurz (z. B. 'DHL', 'Hermes', " +
+    "Benachrichtigungskarten und -schreiben von Paketdiensten (z. B. 'Wir haben Sie nicht angetroffen', Zustellversuch " +
+    "fehlgeschlagen, Abholung in Filiale, Packstation oder Paketshop, Paket beim Nachbarn abgegeben, neuer Zustellversuch) " +
+    "haben IMMER den Dokumenttyp Paketbenachrichtigung, auch wenn kein Abholort genannt ist. " +
+    "Das Feld paket nur bei diesem Dokumenttyp ausfüllen, sonst weglassen. dienstleister = Paketdienst kurz (z. B. 'DHL', 'Hermes', " +
     "'DPD', 'GLS', 'UPS', 'Deutsche Post'); abholort = Name der Abholstelle (z. B. 'Postfiliale', 'Packstation 123', " +
-    "'Paketshop Kiosk am Markt'); adresse = Straße mit Hausnummer, PLZ und Ort der Abholstelle; zustellversuch_am = Datum " +
+    "'Paketshop Kiosk am Markt', beim Nachbarn dessen Name); leer, wenn nur ein neuer Zustellversuch angekündigt ist; adresse = Straße mit Hausnummer, PLZ und Ort der Abholstelle; zustellversuch_am = Datum " +
     "des Zustellversuchs JJJJ-MM-TT; abholbar_bis = letzter Abholtag JJJJ-MM-TT – steht nur eine Dauer da (z. B. " +
-    "'7 Werktage'), ab dem Zustellversuch rechnen (Werktage = Montag bis Samstag), sonst leer; code = Sendungsnummer, " +
+    "'7 Werktage'), ab dem Zustellversuch rechnen (Werktage = Montag bis Samstag), sonst leer; " +
+    "neuer_zustellversuch_am = Datum eines angekündigten neuen Zustellversuchs, sonst leer; code = Sendungsnummer, " +
     "Abholcode oder Abholnummer exakt wie gedruckt; empfaenger = Name, an den das Paket adressiert ist.",
   apply(d, v) {
     if (!v || typeof v !== "object") return;
@@ -88,6 +93,7 @@ registerAiField({
       address: String(v.adresse || "").trim(),
       attempted: isValidIsoDate(v.zustellversuch_am) ? v.zustellversuch_am : "",
       until: isValidIsoDate(v.abholbar_bis) ? v.abholbar_bis : "",
+      redelivery: isValidIsoDate(v.neuer_zustellversuch_am) ? v.neuer_zustellversuch_am : "",
       code: String(v.code || "").trim(),
       recipient: String(v.empfaenger || "").trim(),
     });
@@ -101,7 +107,7 @@ registerReviewSection({
   id: "parcel",
   applies,
   target: () => TARGET,
-  targetNote: "Erscheint auf der Startseite unter „Pakete abholen“. Nach „Abgeholt“ wird der Zettel gelöscht (OneDrive-Papierkorb).",
+  targetNote: "Erscheint auf der Startseite unter „Pakete“. Nach „Abgeholt“ bzw. „Erledigt“ wird der Zettel gelöscht (OneDrive-Papierkorb).",
   render(job, d) {
     const p = d.parcel;
     return `<div class="card" id="parcelSec">
@@ -110,12 +116,13 @@ registerReviewSection({
         <label class="field grow"><span>Dienstleister</span><input type="text" data-q="carrier" value="${esc(p.carrier)}" placeholder="${esc(d.sender || "z. B. DHL")}" autocomplete="off"></label>
         <label class="field grow"><span>Für wen</span><input type="text" data-q="recipient" value="${esc(p.recipient)}" autocomplete="off"></label>
       </div>
-      <label class="field"><span>Abholort</span><input type="text" data-q="location" value="${esc(p.location)}" placeholder="z. B. Postfiliale, Packstation 123" autocomplete="off"></label>
+      <label class="field"><span>Abholort</span><input type="text" data-q="location" value="${esc(p.location)}" placeholder="leer = neuer Zustellversuch" autocomplete="off"></label>
       <label class="field"><span>Adresse</span><input type="text" data-q="address" value="${esc(p.address)}" autocomplete="off"></label>
       <div class="row">
         <label class="field grow"><span>Zustellversuch am</span><input type="date" data-q="attempted" value="${esc(p.attempted)}"></label>
         <label class="field grow"><span>Abholbar bis</span><input type="date" data-q="until" value="${esc(p.until)}"></label>
       </div>
+      ${p.location || p.address ? "" : `<label class="field"><span>Neuer Zustellversuch am</span><input type="date" data-q="redelivery" value="${esc(p.redelivery)}"></label>`}
       <label class="field" style="margin-bottom:0"><span>Sendungsnummer / Abholcode</span><input type="text" data-q="code" value="${esc(p.code)}" autocomplete="off" spellcheck="false"></label>
     </div>`;
   },
@@ -126,6 +133,8 @@ registerReviewSection({
         refresh();
       })
     );
+    // Abholort leer/gefüllt schaltet das Feld „Neuer Zustellversuch am“ um
+    root.querySelectorAll('[data-q="location"],[data-q="address"]').forEach((inp) => inp.addEventListener("change", rerender));
   },
   validate(job, d) {
     const p = d.parcel;
@@ -143,13 +152,14 @@ registerSaveFilter(
     const d = plan.draft;
     if (!isParcelType(S.structure, d.doctype)) return;
     const p = d.parcel;
-    plan.description += " · Paket zum Abholen";
+    plan.description += p.location || p.address ? " · Paket zum Abholen" : " · Paket: neuer Zustellversuch";
     plan.meta.parcel = {
       carrier: String(p.carrier || "").trim() || String(d.sender).trim(),
       location: String(p.location || "").trim(),
       address: String(p.address || "").trim(),
       attempted: p.attempted || "",
       until: p.until || "",
+      redelivery: p.location || p.address ? "" : p.redelivery || "",
       code: String(p.code || "").trim(),
       recipient: String(p.recipient || "").trim(),
       title: d.title,
@@ -199,13 +209,8 @@ on("config:loaded", async (st) => {
   if (!isEnabled(FEATURE, st)) return;
   if (S.account && !S.configMissing && needsSetup(st) && !settingUp) {
     settingUp = true;
-    try {
-      await extendStructure(setupStructure);
-    } catch (e) {
-      console.warn("Dokumenttyp Paketbenachrichtigung konnte nicht ergänzt werden", e);
-    } finally {
-      settingUp = false;
-    }
+    await ensureFeatureSetup("Paketbenachrichtigungen", setupStructure);
+    settingUp = false;
   }
   list.refresh();
 });
@@ -227,12 +232,12 @@ registerHomeSection({
     const items = [...list.current().open].sort(byDeadline);
     if (!items.length) return "";
     return `<div class="card parcels" id="parcelBox">
-      <h2>Pakete abholen</h2>
+      <h2>Pakete</h2>
       <ul class="list">${items.map((e) => {
-        const st = pickupState(e.until);
+        const st = needsPickup(e) ? pickupState(e.until) : "ok";
         return `<li><button class="parcelrow" data-parcel="${esc(e.id)}">
           <span class="grow"><span class="fname">${esc(e.carrier)}${e.location ? ` · ${esc(e.location)}` : ""}</span>
-            <span class="path ${st === "over" || st === "urgent" ? "errtext" : ""}">${esc(pickupText(e.until))}${e.recipient ? ` · für ${esc(e.recipient)}` : ""}</span></span>
+            <span class="path ${st === "over" || st === "urgent" ? "errtext" : ""}">${esc(statusText(e))}${e.recipient ? ` · für ${esc(e.recipient)}` : ""}</span></span>
           <span class="chev" aria-hidden="true">›</span>
         </button></li>`;
       }).join("")}</ul>
