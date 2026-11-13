@@ -198,8 +198,8 @@ export async function readJsonMeta(parts, { archive: a = archive } = {}) {
   const meta = await r.json();
   const drive = meta.parentReference?.driveId;
   const streamPath = drive && meta.id ? `/drives/${encodeURIComponent(drive)}/items/${encodeURIComponent(meta.id)}/contentStream` : "";
-  const d = await download(meta["@microsoft.graph.downloadUrl"], itemUrl(parts, a) + "/content", { streamPath });
-  return { data: await d.json(), eTag: meta.eTag || null };
+  const data = await download(meta["@microsoft.graph.downloadUrl"], itemUrl(parts, a) + "/content", { streamPath, parse: parseJson });
+  return { data, eTag: meta.eTag || null };
 }
 
 /**
@@ -223,10 +223,26 @@ try {
 } catch {}
 
 /** getToken/graphFetch nur für Tests austauschbar */
+/** Antwort als JSON lesen; bei ungültigem Inhalt Fehler mit den ersten Zeichen (zur Fehlersuche). */
+async function parseJson(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text.replace(/^\uFEFF/, ""));
+  } catch {
+    const head = JSON.stringify(text.slice(0, 16)).replace(/\\u0000/g, "\\0");
+    throw new Error(`ungültig ${head}`);
+  }
+}
+
 let dlBlockedUntil = 0; // nach komplettem Fehlschlag kurz nicht erneut alle Wege probieren (sonst bremst Microsoft mit 429)
 let dlBlockedMsg = "";
 
-export async function download(url, contentPath, { streamPath = "", getToken = () => token(), graphFetch = gfetch } = {}) {
+/**
+ * parse(response) → Wert; liefert ein Weg zwar „OK“, aber unbrauchbaren Inhalt, wirft parse und der
+ * nächste Weg wird versucht (so geschehen während der Microsoft-Störung im November 2026).
+ * Ohne parse wird die Antwort selbst zurückgegeben.
+ */
+export async function download(url, contentPath, { streamPath = "", parse = null, getToken = () => token(), graphFetch = gfetch } = {}) {
   if (Date.now() < dlBlockedUntil) throw new Error(dlBlockedMsg);
   const usable = (m) => (m === "stream" || m === "streamBeta" ? !!streamPath : m === "graph" ? true : !!url);
   const order = [dlMode, ...DL_MODES].filter((m, i, all) => m && all.indexOf(m) === i && usable(m));
@@ -244,6 +260,15 @@ export async function download(url, contentPath, { streamPath = "", getToken = (
           ? await fetch(url, { cache: "no-store", headers: { Authorization: `Bearer ${await getToken()}` } })
           : await graphFetch(contentPath, { cache: "no-store" });
       if (d.ok) {
+        let value = d;
+        if (parse) {
+          try {
+            value = await parse(d);
+          } catch (e) {
+            tried.push(`${m} ${e.message}`);
+            continue;
+          }
+        }
         if (m !== dlMode) {
           dlMode = m;
           try {
@@ -251,7 +276,7 @@ export async function download(url, contentPath, { streamPath = "", getToken = (
           } catch {}
           console.info(`OneDrive-Download über "${m}"`);
         }
-        return d;
+        return value;
       }
       tried.push(`${m} ${d.status}`);
     } catch (e) {
@@ -479,14 +504,16 @@ export async function readDiagnostics() {
   const meta = await r.json();
   const drive = meta.parentReference?.driveId;
   const id = meta.id;
+  out.push(`Gemerkter Weg vor dem Test: "${localStorage.getItem("dm.dlMode") || "–"}"`);
   out.push(`Konto: ${account?.username ? account.username.replace(/^(.).*(@.*)$/, "$1…$2") : "?"} · Laufwerk: ${drive?.slice(0, 6)}…`);
   out.push(`Download-Link: ${String(meta["@microsoft.graph.downloadUrl"] || "–").replace(/^(https:\/\/[^/]+).*$/, "$1")} · tempauth: ${/tempauth/i.test(meta["@microsoft.graph.downloadUrl"] || "") ? "ja" : "nein"}`);
   dlBlockedUntil = 0;
   try {
-    await download(meta["@microsoft.graph.downloadUrl"], itemUrl([name]) + "/content", {
+    const got = await download(meta["@microsoft.graph.downloadUrl"], itemUrl([name]) + "/content", {
       streamPath: `/drives/${encodeURIComponent(drive)}/items/${encodeURIComponent(id)}/contentStream`,
+      parse: parseJson,
     });
-    out.push(`Herunterladen: OK über "${dlMode}"`);
+    out.push(`Herunterladen: ${got?.t === payload.t ? "OK" : "Inhalt falsch"} über "${dlMode}"`);
   } catch (e) {
     out.push(`Herunterladen: ${e.message}`);
   }

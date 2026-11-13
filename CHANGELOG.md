@@ -1,5 +1,11 @@
 # Änderungen
 
+## 2.4.4 – Inhalt beim Lesen prüfen
+
+- Ein Download-Weg kann „OK“ melden, aber unbrauchbaren Inhalt liefern (Handy: „Expected property name … at
+  position 1“). Der Inhalt wird jetzt geprüft; ist er kein gültiges JSON, wird der nächste Weg versucht und der
+  gemerkte Weg ersetzt. Lesetest zeigt den gemerkten Weg und prüft den Inhalt.
+
 ## 2.4.3 – Lesetest für OneDrive
 
 - `contentStream` gibt es für private Konten nicht („API not found“). Einstellungen → Technisches →
