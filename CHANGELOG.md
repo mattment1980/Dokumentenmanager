@@ -1,5 +1,13 @@
 # Änderungen
 
+## 2.4.2 – Lesen aus OneDrive über contentStream
+
+- Die Ausweichwege aus 2.4.1 scheitern am neuen Speicher (401 ohne Anmeldung, keine CORS-Freigabe mit Anmeldung,
+  Graph leitet dorthin weiter). Microsoft schafft die vorab angemeldeten Links bis April 2027 ab und nennt
+  `driveItem/contentStream` als Ersatz: Inhalt direkt von graph.microsoft.com, ohne Umleitung.
+- Neue bevorzugte Wege `stream` (v1.0) und `streamBeta` (/beta); die bisherigen bleiben als Rückfall.
+- Fehlermeldung nennt die Antwort jedes Weges.
+
 ## 2.4.1 – Korrektur: Lesen aus OneDrive
 
 - Microsoft stellt privates OneDrive auf neue Speicher um (`my.microsoftpersonalcontent.com`); deren Download-Links

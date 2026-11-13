@@ -196,34 +196,45 @@ export async function readJsonMeta(parts, { archive: a = archive } = {}) {
   if (r.status === 404) return { data: null, eTag: null };
   if (!r.ok) throw await graphError(r);
   const meta = await r.json();
-  const d = await download(meta["@microsoft.graph.downloadUrl"], itemUrl(parts, a) + "/content");
+  const drive = meta.parentReference?.driveId;
+  const streamPath = drive && meta.id ? `/drives/${encodeURIComponent(drive)}/items/${encodeURIComponent(meta.id)}/contentStream` : "";
+  const d = await download(meta["@microsoft.graph.downloadUrl"], itemUrl(parts, a) + "/content", { streamPath });
   return { data: await d.json(), eTag: meta.eTag || null };
 }
 
 /**
  * Inhalt einer Datei holen. Microsoft stellt privates OneDrive auf neue Speicher um
- * (my.microsoftpersonalcontent.com); deren Download-Links sind teils nicht mehr „vorab angemeldet“ und
- * antworten ohne Anmeldung mit 401. Daher drei Wege nacheinander; der zuletzt erfolgreiche wird zuerst versucht:
+ * (my.microsoftpersonalcontent.com); deren Download-Links sind nicht mehr „vorab angemeldet“ (tempauth, von
+ * Microsoft bis April 2027 abgeschafft) und antworten ohne Anmeldung mit 401, mit Anmeldung fehlt die CORS-Freigabe.
+ * Daher mehrere Wege nacheinander; der zuletzt erfolgreiche wird zuerst versucht:
+ *   "stream"     Graph …/contentStream (v1.0) – Inhalt direkt von graph.microsoft.com, ohne Umleitung (Microsofts Ersatz)
+ *   "streamBeta" dasselbe über /beta, solange contentStream dort noch nicht allgemein freigegeben ist
  *   "pre"    Download-Link ohne Anmeldung (bisheriges Verfahren)
  *   "bearer" Download-Link mit Microsoft-Anmeldung
  *   "graph"  über Graph …/content (Weiterleitung zum Speicher)
  * Es geht nur ein Microsoft-Zugriffsschlüssel an Microsoft-Adressen (my.microsoftpersonalcontent.com u. a.,
  * siehe CSP), nie an fremde Server.
  */
-const DL_MODES = ["pre", "bearer", "graph"];
+const DL_MODES = ["stream", "streamBeta", "pre", "bearer", "graph"];
+const GRAPH_BETA = "https://graph.microsoft.com/beta";
 let dlMode = "";
 try {
   dlMode = localStorage.getItem("dm.dlMode") || "";
 } catch {}
 
 /** getToken/graphFetch nur für Tests austauschbar */
-export async function download(url, contentPath, { getToken = () => token(), graphFetch = gfetch } = {}) {
-  const order = [dlMode, ...DL_MODES].filter((m, i, all) => m && all.indexOf(m) === i && (url || m === "graph"));
-  let last = null;
+export async function download(url, contentPath, { streamPath = "", getToken = () => token(), graphFetch = gfetch } = {}) {
+  const usable = (m) => (m === "stream" || m === "streamBeta" ? !!streamPath : m === "graph" ? true : !!url);
+  const order = [dlMode, ...DL_MODES].filter((m, i, all) => m && all.indexOf(m) === i && usable(m));
+  const tried = [];
   for (const m of order) {
     try {
       const d =
-        m === "pre"
+        m === "stream"
+          ? await graphFetch(streamPath, { cache: "no-store" })
+          : m === "streamBeta"
+          ? await graphFetch(GRAPH_BETA + streamPath, { cache: "no-store" })
+          : m === "pre"
           ? await fetch(url, { cache: "no-store" })
           : m === "bearer"
           ? await fetch(url, { cache: "no-store", headers: { Authorization: `Bearer ${await getToken()}` } })
@@ -238,15 +249,14 @@ export async function download(url, contentPath, { getToken = () => token(), gra
         }
         return d;
       }
-      last = new Error(`OneDrive: Datei nicht lesbar (${d.status})`);
+      tried.push(`${m} ${d.status}`);
     } catch (e) {
       if (e instanceof AuthNeeded) throw e;
-      last = e;
+      tried.push(`${m} ${e.message === "Failed to fetch" ? "blockiert" : e.message}`);
     }
   }
-  throw new Error(
-    `OneDrive: Datei ließ sich nicht herunterladen (${last?.message === "Failed to fetch" ? "Download von Microsoft verweigert" : last?.message || "unbekannt"}).`
-  );
+  // Antwort je Weg mit ausgeben – hilft bei der Fehlersuche, falls Microsoft weiter umstellt
+  throw new Error(`OneDrive: Datei ließ sich nicht herunterladen (${tried.join(", ") || "kein Weg verfügbar"}).`);
 }
 
 /** Wird geworfen, wenn eine Datei seit dem Lesen von jemand anderem geändert wurde. */
