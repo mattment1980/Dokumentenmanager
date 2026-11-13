@@ -14,6 +14,7 @@ import { I } from "../core/icons.js";
 import { setArchive } from "../core/archive.js";
 import { loadRemoteConfig, saveStructure, saveFeatures, normalizeStructure, checkStructure } from "../core/structure.js";
 import { getFeatures, isEnabled } from "../core/features.js";
+import { getDoctypeOptions, getSettingsSections } from "../core/extensions.js";
 import { settings } from "../services/storage.js";
 import * as od from "../services/onedrive.js";
 import * as ai from "../services/ai.js";
@@ -22,7 +23,7 @@ import { cleanFolderName } from "../documents/naming.js";
 // Stand der Struktur, von dem die Bearbeitung ausging (ohne Schalter) – zum Erkennen ungespeicherter Änderungen
 let base = "";
 const comparable = (st) => {
-  const { features, ...rest } = normalizeStructure(st);
+  const { features, featureSettings, ...rest } = normalizeStructure(st);
   return JSON.stringify(rest);
 };
 
@@ -85,6 +86,8 @@ const screen = {
         </label>`).join("")}
       </div>
 
+      ${getSettingsSections().map((s) => `<div class="card" id="set-${esc(s.id)}">${s.render()}</div>`).join("")}
+
       <div class="card">
         <h2>Ordnerstruktur</h2>
         <p class="muted small">Die Beschreibung ist die Regel, nach der die KI einsortiert. Neue Ordner werden beim Speichern in OneDrive angelegt. Umbenannte oder gelöschte Ordner bleiben in OneDrive unverändert bestehen und müssen dort von Hand umbenannt oder verschoben werden.</p>
@@ -123,6 +126,14 @@ const screen = {
 
     this.renderEditor();
     this.renderDoctypes();
+    for (const s of getSettingsSections()) {
+      const root = $(`#set-${s.id}`);
+      const rerender = () => {
+        root.innerHTML = s.render();
+        s.bind?.(root, rerender);
+      };
+      s.bind?.(root, rerender);
+    }
 
     $("#logout") && ($("#logout").onclick = () => od.logout());
     $("#amode").onclick = async (e) => {
@@ -256,16 +267,20 @@ const screen = {
   renderDoctypes() {
     const box = $("#dts");
     const ds = S.edit.doctypes;
+    // Merkmale der Funktionsmodule je Dokumenttyp (z. B. „Kalender-Abfrage“), als Häkchen unter der Zeile
+    const opts = getDoctypeOptions();
     box.innerHTML = ds.map((d, i) => `<div class="dtrow" data-i="${i}">
         <input type="text" data-k="name" value="${esc(d.name)}" placeholder="Name">
         <input type="text" data-k="short" value="${esc(d.short)}" placeholder="Kürzel">
         <button class="iconbtn" data-up ${i === 0 ? "disabled" : ""} aria-label="Nach oben">${I.up}</button>
         <button class="iconbtn" data-down ${i === ds.length - 1 ? "disabled" : ""} aria-label="Nach unten">${I.down}</button>
         <button class="iconbtn" data-del aria-label="Löschen">${I.trash}</button>
+        ${opts.length ? `<div class="dtopts">${opts.map((o) => `<label><input type="checkbox" data-o="${esc(o.key)}" ${o.get(d) ? "checked" : ""}> ${esc(o.label)}</label>`).join("")}</div>` : ""}
       </div>`).join("");
     $$(".dtrow", box).forEach((row) => {
       const i = Number(row.dataset.i);
       $$("[data-k]", row).forEach((inp) => inp.addEventListener("input", () => (ds[i][inp.dataset.k] = inp.value)));
+      $$("[data-o]", row).forEach((cb) => cb.addEventListener("change", () => (ds[i][cb.dataset.o] = cb.checked)));
       row.addEventListener("click", (e) => {
         const b = e.target.closest("button");
         if (!b) return;
@@ -301,6 +316,9 @@ const screen = {
   },
 
   async save() {
+    // Schalter und Modul-Einstellungen werden sofort gespeichert – immer den aktuellen Stand übernehmen
+    S.edit.features = clone(S.structure.features || {});
+    S.edit.featureSettings = clone(S.structure.featureSettings || {});
     const st = normalizeStructure(S.edit);
     const err = checkStructure(st);
     if (err) return toast(err, 5000);

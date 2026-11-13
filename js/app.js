@@ -18,6 +18,7 @@ import { checkShareInbox, listenForLaunchFiles } from "./importers/sources.js";
 import "./features/invoices/index.js";
 import "./features/vouchers/index.js";
 import "./features/parcels/index.js";
+import "./features/calendar/index.js";
 
 // Bildschirme (melden sich selbst beim Router an)
 import "./screens/setup.js";

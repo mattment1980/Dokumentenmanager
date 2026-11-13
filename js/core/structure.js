@@ -13,6 +13,7 @@ import { busy, busyText, unbusy, toast, errText } from "./ui.js";
 import { archiveLabel } from "./archive.js";
 import { emit } from "./events.js";
 import { cleanFolderName } from "../documents/naming.js";
+import { getDoctypeOptions } from "./extensions.js";
 
 export async function loadRemoteConfig() {
   try {
@@ -135,12 +136,38 @@ export async function saveFeatures(features) {
   throw new Error("Die Konfiguration wird gerade von einem anderen Gerät geändert. Bitte gleich nochmal versuchen.");
 }
 
+/**
+ * Einstellungen eines Funktionsmoduls ändern (gemeinsam für alle Nutzer des Archivs), z. B.
+ * saveFeatureSettings("calendar", { calendarId: "…" }). Ändert nur diesen Eintrag der Konfiguration.
+ */
+export async function saveFeatureSettings(id, patch) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, eTag } = await od.readJsonMeta([APP.configFileName]);
+    const st = data && Array.isArray(data.folders) ? clone(data) : clone(S.structure);
+    st.featureSettings = { ...(st.featureSettings || {}), [id]: { ...(st.featureSettings?.[id] || {}), ...patch } };
+    try {
+      await od.writeJson([APP.configFileName], st, eTag ? { ifMatch: eTag } : {});
+    } catch (e) {
+      if (e instanceof od.Conflict) continue;
+      throw e;
+    }
+    apply(st);
+    return st;
+  }
+  throw new Error("Die Konfiguration wird gerade von einem anderen Gerät geändert. Bitte gleich nochmal versuchen.");
+}
+
+/** Einstellungen eines Funktionsmoduls (gemeinsame Konfiguration). */
+export const featureSettings = (id, structure = S.structure) => structure?.featureSettings?.[id] || {};
+
 /** Bearbeitungskopie (mit Hilfsfeldern wie _open) in eine saubere Struktur umwandeln. */
 export function normalizeStructure(edit) {
   return {
     version: 1,
     // Schalter der Funktionsmodule (core/features.js) unverändert übernehmen
     ...(edit.features && typeof edit.features === "object" ? { features: { ...edit.features } } : {}),
+    // Einstellungen der Funktionsmodule (z. B. gewählter Google-Kalender) unverändert übernehmen
+    ...(edit.featureSettings && typeof edit.featureSettings === "object" ? { featureSettings: clone(edit.featureSettings) } : {}),
     folders: edit.folders.map((f) => ({
       name: cleanFolderName(f.name),
       description: String(f.description || "").trim(),
@@ -157,6 +184,8 @@ export function normalizeStructure(edit) {
         hint: String(d.hint || "").trim(),
         // Zusatzmerkmale von Funktionsmodulen erhalten (z. B. payable für das Rechnungsmodul)
         ...(typeof d.payable === "boolean" ? { payable: d.payable } : {}),
+        // Merkmale je Dokumenttyp, die Module anmelden (z. B. calendar für die Kalender-Abfrage)
+        ...Object.fromEntries(getDoctypeOptions({ all: true }).filter((o) => typeof d[o.key] === "boolean").map((o) => [o.key, d[o.key]])),
         ...(d.feature ? { feature: String(d.feature) } : {}),
       }))
       .filter((d) => d.name),

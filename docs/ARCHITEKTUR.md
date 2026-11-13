@@ -24,6 +24,7 @@ js/
     extensions.js       Erweiterungspunkte für Funktionsmodule (siehe unten)
     features.js         Anmeldung und Schalter der Funktionsmodule (an/aus)
     sharedlist.js       gemeinsame, konfliktsichere Liste in OneDrive (für Funktionsmodule)
+  services/google.js    Google-Anmeldung (ohne Bibliothek) und Kalender-API; Rückgabeseite google-redirect.html
     archive.js          aktiver Archivordner (eigen / geteilt)
     structure.js        Ordnerstruktur laden, prüfen, speichern; Ergänzungen durch Module, Schalter speichern
     uploader.js         Upload-Warteschlange (offline-fest)
@@ -51,6 +52,9 @@ js/
     vouchers/           Gutscheine & Rabatte: eigener Hauptordner, offene Liste, Benutzt/Teilweise/Abgelaufen
       index.js            Anmeldung an den Erweiterungspunkten, Aktionen (retire, redeemPartly …)
       model.js            Konfiguration ergänzen, Gültigkeit, Sortierung (reine Funktionen)
+    calendar/           Google-Kalender: Termine erkennen, Rückfrage + Maske, eintragen, vormerken
+      index.js            Anmeldung an den Erweiterungspunkten, Einstellungen, Vormerkliste
+      model.js            Kalender-Abfrage je Typ, KI-Termine, Prüfung, Google-Termin (reine Funktionen)
     parcels/            Paketbenachrichtigungen: Box auf der Startseite, Zettel zeigen, Abgeholt = löschen
       index.js            Anmeldung, Vorschaubild beim Ablegen, Aktion pickedUp
       model.js            Fristen, Kartenlink (reine Funktionen)
@@ -120,6 +124,8 @@ zu kennen. So bleibt jedes Modul in sich geschlossen und lässt sich ab- oder um
 | `registerReviewSection({id, applies, render, bind, validate})` | Prüfen-Bildschirm | „Bezahlt?“ mit Zahlungsdaten |
 | `registerSaveFilter(fn(plan))` | vor dem Ablegen | Zielordner, `_bezahlt`, Vermerk, `plan.meta` |
 | `registerHomeSection({id, render, bind})` | Startseite | Kachel „Offene Rechnungen“ |
+| `registerDoctypeOption({key, label, get})` | Einstellungen → Dokumenttypen (Häkchen je Typ) | „Kalender-Abfrage“, „Bezahlt?“-Frage |
+| `registerSettingsSection({id, render, bind})` | eigener Abschnitt in den Einstellungen | Google-Kalender |
 | `registerSavePrepare(async fn(plan))` | beim Ablegen, vor dem Hochladen (asynchron) | Pakete: Bild des Zettels in `plan.meta` |
 
 Ein Prüfen-Abschnitt kann mit `target(job, draft)` den Ablageort festlegen (z. B. Gutscheine → `15_Gutscheine`,
@@ -145,6 +151,13 @@ Beschreibung eines Modul-Typs, wird die alte Fassung nur ersetzt, wenn sie unver
 den `model.js`). Die Teile tragen
 `feature: "<id>"`, damit sie auch nach Umbenennen erkannt werden. Wer den Typ „Gutschein“ loswerden will, schaltet
 das Modul ab – bei eingeschaltetem Modul wird er sonst wieder ergänzt.
+
+## Einstellungen der Module
+
+Gemeinsame Einstellungen eines Moduls stehen in der Konfiguration unter `featureSettings.<id>` (z. B.
+`featureSettings.calendar = { clientId, calendarId, calendarName, reminderDays }`). Lesen mit
+`featureSettings(id)`, schreiben mit `saveFeatureSettings(id, patch)` (core/structure.js) – konfliktsicher, nur dieser
+Eintrag. Einstellungen, die nur ein Gerät betreffen (z. B. die Google-Verbindung), bleiben im lokalen Speicher.
 
 ## Gemeinsame Listen
 

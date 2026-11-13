@@ -69,6 +69,23 @@ jemand sie aktiv teilt, hineinzieht oder auswählt.
   endgültig gelöscht.
 - Der Kartenlink öffnet Google Maps mit dem Abholort – erst auf ausdrücklichen Tipp, nie automatisch.
 
+## Google-Kalender
+
+- **Berechtigungen:** nur `calendar.events` (Termine ansehen und bearbeiten) und `calendar.calendarlist.readonly`
+  (Kalenderliste zur Auswahl). Kein Zugriff auf Gmail, Kontakte oder Drive. Weil ein bestehender Kalender genutzt wird,
+  ist die engere Berechtigung „nur von der App angelegte Kalender“ nicht möglich: Die App *könnte* technisch Termine
+  in allen Kalendern des Kontos bearbeiten, schreibt aber nur in den gewählten und liest keine Termine.
+- **Keine Google-Bibliothek:** Die Anmeldung läuft ohne Skript von Google (OAuth „Implicit Flow“ in einem kleinen
+  Fenster, Rückgabe über `google-redirect.html`). Die Rückgabeseite entfernt den Zugriffsschlüssel sofort aus der
+  Adresszeile und reicht ihn nur an die App derselben Herkunft weiter (BroadcastChannel/localStorage, `state`-Prüfung).
+- **Zugriffsschlüssel:** gilt etwa eine Stunde, liegt nur im lokalen Speicher des Geräts; kein dauerhafter
+  Erneuerungsschlüssel. „Trennen“ zieht ihn bei Google zurück.
+- **Jede Person mit eigenem Google-Konto;** der Kalender wird in Google geteilt, Zugangsdaten werden nie geteilt.
+- **An Google gehen nur:** Titel, Datum/Uhrzeit, Ort, Kommentar, Link zum Dokument in OneDrive (nur für Berechtigte
+  aufrufbar) und der Name der eintragenden Person – nie das Dokument selbst.
+- Die Google-App bleibt im Status „Test“ mit genau zwei Testnutzern; fremde Konten können sich nicht anmelden.
+- CSP: zusätzlich `https://www.googleapis.com` und `https://oauth2.googleapis.com` in `connect-src`.
+
 ## Regeln für Erweiterungen
 
 - Keine Schlüssel, Passwörter oder persönlichen Daten in den Code oder in Testdateien.

@@ -37,7 +37,16 @@ Optimiert für Chrome auf Android, nutzbar auch am Desktop.
 - Antippen zeigt den Zettel bildschirmfüllend (Barcode zum Vorzeigen), Abholort mit Kartenlink, Code zum Kopieren
 - **Abgeholt** bzw. **Erledigt** löscht den Zettel (landet im OneDrive-Papierkorb)
 
-Rechnungen, Gutscheine und Pakete lassen sich unter Einstellungen → **Funktionen** einzeln abschalten
+**Kalender (Google)**
+- Erkennt Termine und Fristen (auch berechnete, z. B. Einspruchsfristen) und fragt: „In den Kalender eintragen?“
+- Maske für Titel, Datum, Uhrzeit/ganztägig, Ort, Erinnerung und Kommentar; Eintrag mit Link zum Dokument
+- Gemeinsamer Kalender für alle Nutzer, jede Person verbindet ihr eigenes Google-Konto
+- Einrichtung: [docs/GOOGLE-KALENDER.md](docs/GOOGLE-KALENDER.md)
+
+Ob bei einem Dokumenttyp nach Kalender oder „Bezahlt?“ gefragt wird, ist unter Einstellungen → Ordnerstruktur →
+Dokumenttypen einstellbar.
+
+Rechnungen, Gutscheine, Pakete und Kalender lassen sich unter Einstellungen → **Funktionen** einzeln abschalten
 (gilt für alle Nutzer des Archivs; Dateien und Listen bleiben erhalten).
 
 **Ablegen**

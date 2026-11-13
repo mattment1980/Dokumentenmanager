@@ -44,6 +44,10 @@ DISCOUNT = {"folder": "00_Eingang", "subfolder": "", "doctype": "Gutschein/Rabat
             "gutschein": {"art": "rabatt", "einloesbar_bei": "Sportladen", "rabatt": "20 %", "wofuer": "alle Fußballschuhe", "betrag": 99, "code": "HERBST20", "gueltig_bis": iso(40), "einloesung": "online"}}
 REDELIVERY = {"folder": "00_Eingang", "subfolder": "", "doctype": "Paketbenachrichtigung", "sender": "Hermes", "title": "Zustellversuch", "letter_date": iso(0), "confidence": 0.9, "reason": "Nicht angetroffen.",
               "paket": {"dienstleister": "Hermes", "abholort": "", "adresse": "", "zustellversuch_am": iso(0), "abholbar_bis": "", "neuer_zustellversuch_am": iso(1), "code": "H123", "empfaenger": ""}}
+APPOINT = {"folder": "06_Steuern", "subfolder": "Gemeinsam", "doctype": "Termin/Einladung", "sender": "Dr. Huber", "title": "Kontrolltermin", "letter_date": iso(-2), "confidence": 0.9, "reason": "Terminbestätigung.",
+           "termine": [{"art": "termin", "titel": "Zahnarzt Dr. Huber", "datum": iso(12), "beginn": "10:30", "ende": "", "ort": "Hauptstr. 5", "berechnet": False, "grundlage": ""},
+                       {"art": "frist", "titel": "Unterlagen nachreichen", "datum": iso(30), "beginn": "", "ende": "", "ort": "", "berechnet": True, "grundlage": "innerhalb eines Monats"},
+                       {"art": "termin", "titel": "Vergangen", "datum": iso(-5), "beginn": "09:00"}]}
 PARCEL = {"folder": "00_Eingang", "subfolder": "", "doctype": "Paketbenachrichtigung", "sender": "DHL", "title": "Paket abholen", "letter_date": iso(0), "confidence": 0.95, "reason": "Benachrichtigungskarte.",
           "paket": {"dienstleister": "DHL", "abholort": "Postfiliale", "adresse": "Hauptstr. 1, 12345 Musterstadt", "zustellversuch_am": iso(0), "abholbar_bis": iso(1), "code": "JJD000123", "empfaenger": "Testi"}}
 SPECIAL = [None]
@@ -108,6 +112,7 @@ with sync_playwright() as p:
     pg.on("pageerror", lambda e: errors.append("PAGEERROR " + str(e)))
     pg.on("dialog", lambda d: d.accept())
     pg.route("**/js/services/onedrive.js", lambda r: r.fulfill(path=os.path.join(HERE, "mock-onedrive.js"), headers={"content-type": "text/javascript"}))
+    pg.route("**/js/services/google.js", lambda r: r.fulfill(path=os.path.join(HERE, "mock-google.js"), headers={"content-type": "text/javascript"}))
     pg.route("https://api.anthropic.com/**", anthropic)
 
     print("1) Start und Struktur")
@@ -420,7 +425,7 @@ with sync_playwright() as p:
 
     print("14) Funktionen an- und abschalten")
     pg.click("[data-act=settings]"); pg.wait_for_selector("#features")
-    check("Drei Funktionen mit Schalter, alle an", pg.locator("[data-feature]").count() == 3 and all(pg.is_checked(f"[data-feature={f}]") for f in ("invoices", "vouchers", "parcels")))
+    check("Vier Funktionen mit Schalter, alle an", pg.locator("[data-feature]").count() == 4 and all(pg.is_checked(f"[data-feature={f}]") for f in ("invoices", "vouchers", "parcels", "calendar")))
     pg.uncheck("[data-feature=vouchers]"); pg.wait_for_timeout(500)
     check("Schalter in der gemeinsamen Konfiguration gespeichert", od(pg)["config"].get("features", {}).get("vouchers") is False)
     pg.screenshot(path=f"{SHOTS}/20_settings_features.png", full_page=True)
@@ -439,6 +444,100 @@ with sync_playwright() as p:
     check("Wieder eingeschaltet, Ordner nicht doppelt", cfg["features"]["vouchers"] is True and len([f for f in cfg["folders"] if "Gutscheine" in f["name"]]) == 1)
     pg.click("[data-act=back]"); pg.wait_for_selector("#tileVouchers")
     check("Kachel wieder da, Liste unverändert", "2 offen" in pg.inner_text("#tileVouchers"))
+
+    print("15) Kalender: einrichten, erkennen, Maske, eintragen, vormerken, je Dokumenttyp abschalten")
+    gcal = lambda: pg.evaluate("JSON.parse(localStorage.getItem('__gcal') || JSON.stringify({events: []}))")
+    pg.click("[data-act=settings]"); pg.wait_for_selector("#set-calendar")
+    check("Einstellungen: Abschnitt Google-Kalender, Weiterleitungs-URI", "google-redirect.html" in pg.text_content("#set-calendar"))
+    pg.fill("#gcId", "quatsch"); pg.click("#gcIdSave"); pg.wait_for_timeout(200)
+    check("Ungültige Client-ID abgelehnt", not od(pg)["config"].get("featureSettings"))
+    pg.fill("#gcId", "123-abc.apps.googleusercontent.com"); pg.click("#gcIdSave"); pg.wait_for_selector("#gcOn")
+    check("Client-ID in der gemeinsamen Konfiguration", od(pg)["config"]["featureSettings"]["calendar"]["clientId"] == "123-abc.apps.googleusercontent.com")
+    pg.click("#gcOn"); pg.wait_for_selector("#gcCal")
+    check("Verbunden, Kalenderliste", "test@gmail.com" in pg.inner_text("#set-calendar") and pg.locator("#gcCal option").count() == 3)
+    pg.select_option("#gcCal", "familie123@group.calendar.google.com"); pg.wait_for_timeout(400)
+    cs = od(pg)["config"]["featureSettings"]["calendar"]
+    check("Kalender gewählt und gespeichert", cs["calendarId"] == "familie123@group.calendar.google.com" and cs["calendarName"] == "Familie", cs)
+    rows = {pg.input_value(f".dtrow >> nth={i} >> [data-k=name]"): i for i in range(pg.locator(".dtrow").count())}
+    opt = lambda name, key: pg.is_checked(f".dtrow >> nth={rows[name]} >> [data-o={key}]")
+    check("Je Dokumenttyp: Kalender-Abfrage (Standard)", opt("Termin/Einladung", "calendar") and opt("Bescheid", "calendar") and not opt("Rechnung", "calendar") and not opt("Gutschein/Rabatt", "calendar") and not opt("Paketbenachrichtigung", "calendar"))
+    check("Je Dokumenttyp: „Bezahlt?“-Frage", opt("Rechnung", "payable") and not opt("Bescheid", "payable"))
+    pg.screenshot(path=f"{SHOTS}/23_settings_calendar.png", full_page=True)
+    pg.click("[data-act=back]"); pg.wait_for_selector("#scan")
+
+    SPECIAL[0] = APPOINT
+    n_ai = len(ai_calls)
+    scan_with_ai(pg)
+    sch = ai_calls[n_ai]["tools"][0]["input_schema"]["properties"]
+    check("KI-Schema enthält Termine, Regel zu Fristen", "termine" in sch and "Bekanntgabe" in ai_calls[n_ai]["system"])
+    check("Frage: 2 Termine erkannt (vergangener entfällt)", "2 Termine erkannt" in pg.inner_text("#calSec") and "Vergangen" not in pg.inner_text("#calSec") and "berechnet" in pg.inner_text("#calSec"))
+    pg.screenshot(path=f"{SHOTS}/24_review_calendar_ask.png", full_page=True)
+    pg.click("[data-cal=yes]"); pg.wait_for_selector(".calitem")
+    check("Maske mit 2 Einträgen, Frist ganztägig", pg.locator(".calitem").count() == 2 and pg.is_checked(".calitem >> nth=1 >> [data-f=allDay]") and not pg.is_checked(".calitem >> nth=0 >> [data-f=allDay]"))
+    check("Erinnerung Standard 3 Tage", pg.input_value(".calitem >> nth=0 >> [data-f=reminderDays]") == "3")
+    pg.fill(".calitem >> nth=0 >> [data-f=comment]", "Bonusheft mitnehmen")
+    pg.select_option(".calitem >> nth=0 >> [data-f=reminderDays]", "7")
+    pg.screenshot(path=f"{SHOTS}/25_review_calendar_mask.png", full_page=True)
+    pg.fill(".calitem >> nth=0 >> [data-f=title]", ""); pg.wait_for_timeout(100)
+    check("Ohne Titel kein Ablegen", pg.is_disabled("#save"))
+    pg.fill(".calitem >> nth=0 >> [data-f=title]", "Zahnarzt Dr. Huber")
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000); pg.wait_for_timeout(500)
+    SPECIAL[0] = None
+    ev = gcal()["events"]
+    check("2 Termine im gewählten Kalender", len(ev) == 2 and all(e["calendarId"] == "familie123@group.calendar.google.com" for e in ev), len(ev))
+    e0, e1 = ev[0]["body"], ev[1]["body"]
+    check("Termin mit Uhrzeit, Ende +1 Std., Ort", e0["start"]["dateTime"] == iso(12) + "T10:30:00" and e0["end"]["dateTime"] == iso(12) + "T11:30:00" and e0["location"] == "Hauptstr. 5", e0)
+    check("Erinnerung 7 Tage, Kommentar und Link zum PDF", e0["reminders"]["overrides"][0]["minutes"] == 7 * 1440 and "Bonusheft mitnehmen" in e0["description"] and "onedrive" in e0["description"].lower(), e0["description"])
+    check("Frist ganztägig mit Prefix und Prüfhinweis", e1["summary"] == "Frist: Unterlagen nachreichen" and e1["start"] == {"date": iso(30)} and e1["end"] == {"date": iso(31)} and "berechnet" in e1["description"], e1)
+    check("Vermerk in OneDrive nennt den Kalender", "Kalender: Zahnarzt" in uploads(pg)[-1]["description"])
+
+    # Rechnung fragt nicht; Vertrag ohne erkannten Termin: Knopf „Termin eintragen“
+    pg.click("[data-act=home]"); pg.wait_for_selector("#scan")
+    pg.set_input_files("#camInput", os.path.join(FX, "brief.jpg")); pg.wait_for_selector("#next", timeout=20000); pg.click("#next")
+    pg.click("#direct"); pg.wait_for_selector("#save")
+    pg.click("#dt [data-v='Rechnung']"); pg.wait_for_timeout(150)
+    check("Rechnung: keine Kalender-Abfrage", not pg.query_selector("#calSec"))
+    pg.click("#dt [data-v='Vertrag']"); pg.wait_for_selector("#calSec")
+    check("Ohne KI: Knopf „Termin eintragen“", "Kein Termin erkannt" in pg.inner_text("#calSec"))
+    pg.click("[data-cal=manual]"); pg.wait_for_selector(".calitem")
+    pg.fill("#sender", "Fitnessstudio"); pg.fill("#title", "Mitgliedschaft")
+    pg.click("#fo [data-v='11_Verträge & Abos']"); pg.wait_for_timeout(100)
+    sub = pg.query_selector("#sf [data-v]")
+    if sub: sub.click()
+    pg.click(".calitem [data-kind=frist]"); pg.wait_for_timeout(100)
+    pg.fill(".calitem [data-f=title]", "Kündigung Fitnessstudio"); pg.fill(".calitem [data-f=date]", iso(60))
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000); pg.wait_for_timeout(500)
+    check("Manueller Termin eingetragen", gcal()["events"][-1]["body"]["summary"] == "Frist: Kündigung Fitnessstudio" and len(gcal()["events"]) == 3)
+
+    # Anmeldung abgelaufen: vormerken, auf der Startseite nachholen
+    s = gcal(); s["expireOnInsert"] = True
+    pg.evaluate("s => localStorage.setItem('__gcal', JSON.stringify(s))", s)
+    SPECIAL[0] = APPOINT
+    pg.click("[data-act=home]"); pg.wait_for_selector("#scan")
+    scan_with_ai(pg); pg.click("[data-cal=yes]"); pg.wait_for_selector(".calitem")
+    pg.click("#save"); pg.wait_for_selector("#again", timeout=15000); pg.wait_for_timeout(500)
+    SPECIAL[0] = None
+    pg.click("[data-act=home]"); pg.wait_for_selector("#calPending")
+    check("Vorgemerkt: Box auf der Startseite", "Kalendereinträge offen" in pg.inner_text("#calPending") and len(gcal()["events"]) == 3)
+    pg.screenshot(path=f"{SHOTS}/26_home_calendar_pending.png")
+    pg.click("#calRetry"); pg.wait_for_timeout(600)
+    check("Nachgeholt: eingetragen, Box weg", len(gcal()["events"]) == 5 and not pg.query_selector("#calPending"), len(gcal()["events"]))
+
+    # Je Dokumenttyp abschalten
+    pg.click("[data-act=settings]"); pg.wait_for_selector("#dts")
+    pg.uncheck(f".dtrow >> nth={rows['Termin/Einladung']} >> [data-o=calendar]")
+    pg.click("#saveStruct"); pg.wait_for_timeout(600)
+    dt = [d for d in od(pg)["config"]["doctypes"] if d["name"] == "Termin/Einladung"][0]
+    cs2 = od(pg)["config"]["featureSettings"]["calendar"]
+    check("Merkmal gespeichert, Kalender-Einstellungen erhalten", dt.get("calendar") is False and cs2["calendarId"] == "familie123@group.calendar.google.com", dt)
+    pg.click("[data-act=back]"); pg.wait_for_selector("#scan")
+    SPECIAL[0] = APPOINT
+    scan_with_ai(pg)
+    SPECIAL[0] = None
+    check("Abgeschaltet für Termin/Einladung: keine Abfrage", not pg.query_selector("#calSec"))
+    while not pg.query_selector("#discard"):
+        pg.click("[data-act=back]"); pg.wait_for_timeout(150)
+    pg.click("#discard")
 
     # Desktop-Ansicht der Startseite
     pg.set_viewport_size({"width": 1280, "height": 800}); pg.wait_for_selector("#scan"); pg.wait_for_timeout(300)

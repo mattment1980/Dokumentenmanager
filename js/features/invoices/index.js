@@ -23,7 +23,7 @@ import { S, doctypeByName, uploaderName } from "../../core/state.js";
 import { esc } from "../../core/ui.js";
 import { on } from "../../core/events.js";
 import { registerFeature } from "../../core/features.js";
-import { registerAiField, registerDraftInit, registerReviewSection, registerSaveFilter, registerHomeSection } from "../../core/extensions.js";
+import { registerDoctypeOption, registerAiField, registerDraftInit, registerReviewSection, registerSaveFilter, registerHomeSection } from "../../core/extensions.js";
 import { go } from "../../core/router.js";
 import { history } from "../../services/storage.js";
 import * as od from "../../services/onedrive.js";
@@ -50,6 +50,14 @@ export function isPayable(doctypeName) {
   if (dt && typeof dt.payable === "boolean") return dt.payable;
   return /^(rechnung|mahnung)\b/i.test(String(doctypeName || ""));
 }
+// In den Einstellungen je Dokumenttyp umschaltbar (Ordnerstruktur → Dokumenttypen)
+registerDoctypeOption({
+  feature: FEATURE,
+  key: "payable",
+  label: "„Bezahlt?“-Frage",
+  get: (dt) => (typeof dt.payable === "boolean" ? dt.payable : /^(rechnung|mahnung)\b/i.test(String(dt.name || ""))),
+});
+
 const isReminder = (doctypeName) => /^mahnung/i.test(String(doctypeName || ""));
 
 // ---------- 1. Entwurf und KI ----------

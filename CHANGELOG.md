@@ -1,5 +1,26 @@
 # Änderungen
 
+## 2.4.0 – Google-Kalender
+
+**Neu**
+- Termine und Fristen aus Dokumenten erkennen (KI) und nach Rückfrage in einen gemeinsamen Google-Kalender eintragen
+  - Prüfen-Bildschirm: „Termin erkannt – in den Kalender eintragen?“ → Maske mit Titel, Termin/Frist, Datum,
+    Uhrzeit oder ganztägig, Ort, Erinnerung (Standard 3 Tage vorher), Kommentar; mehrere Termine je mit Häkchen
+  - Berechnete Fristen („innerhalb eines Monats nach Bekanntgabe“) sind als „berechnet – bitte prüfen“ markiert
+  - Ohne erkannten Termin bzw. bei „Direkt ablegen“: Knopf „Termin eintragen“
+  - Im Kalendertermin: Kommentar, Link zum Dokument in OneDrive, wer eingetragen hat
+  - Klappt das Eintragen nicht, bleibt der Termin vorgemerkt (Startseite → „Jetzt eintragen“), ohne Doppel
+- Einstellungen → Google-Kalender: Client-ID, Kalender und Standard-Erinnerung (gemeinsam), Verbindung je Gerät
+- Merkmale je Dokumenttyp in den Einstellungen umschaltbar: „Kalender-Abfrage“ (Standard: nicht bei Rechnung,
+  Mahnung, Gutschein/Rabatt, Paketbenachrichtigung) und „Bezahlt?“-Frage
+
+**Intern**
+- Neues Modul `features/calendar/`, Dienst `services/google.js` (Anmeldung ohne Google-Bibliothek, Rückgabeseite
+  `google-redirect.html`)
+- Neue Erweiterungspunkte `registerDoctypeOption` und `registerSettingsSection`; Modul-Einstellungen in der
+  Konfiguration unter `featureSettings` (`saveFeatureSettings`)
+- CSP: `www.googleapis.com` und `oauth2.googleapis.com` erlaubt
+
 ## 2.3.0 – Rabatte, Paketzettel besser erkannt
 
 **Neu**

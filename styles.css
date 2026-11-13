@@ -320,3 +320,18 @@ code.copy { display: block; background: var(--surface-2); padding: 10px; border-
   color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 6px; margin-right: 6px;
   vertical-align: 1px;
 }
+
+/* ---------- Ab Version 2.4: Kalender, Merkmale je Dokumenttyp ---------- */
+.dtopts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--ink-2); margin: -2px 0 6px 2px; }
+.dtopts label { display: inline-flex; align-items: center; gap: 6px; }
+.dtopts input { width: 16px; height: 16px; min-height: 0; margin: 0; }
+
+.calask { border-color: var(--accent); }
+.callist li { display: block; padding: 6px 0; }
+.callist .path { display: block; }
+.calitem { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+.calitem:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+.calitem.off { opacity: 0.7; }
+.calday { align-self: flex-end; margin: 0 0 14px; white-space: nowrap; }
+#calSec textarea { width: 100%; resize: vertical; }
+#calPending { border-color: var(--warn); }

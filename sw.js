@@ -11,13 +11,15 @@
  * Pflege: CACHE muss zur Version in js/core/config.js passen; SHELL muss alle Dateien der App
  * enthalten. Beides prüft tests/unit/release.test.mjs.
  */
-const CACHE = "dm-v2.3.0";
+const CACHE = "dm-v2.4.0";
 const SHARE_CACHE = "dm-share";
 const SHELL = [
   "./",
   "index.html",
   "redirect.html",
   "redirect.js",
+  "google-redirect.html",
+  "google-redirect.js",
   "styles.css",
   "manifest.webmanifest",
   "js/app.js",
@@ -34,6 +36,8 @@ const SHELL = [
   "js/core/structure.js",
   "js/core/ui.js",
   "js/core/uploader.js",
+  "js/features/calendar/index.js",
+  "js/features/calendar/model.js",
   "js/features/invoices/index.js",
   "js/features/invoices/payment.js",
   "js/features/invoices/register.js",
@@ -66,6 +70,7 @@ const SHELL = [
   "js/screens/vouchers.js",
   "js/screens/shared.js",
   "js/services/ai.js",
+  "js/services/google.js",
   "js/services/onedrive.js",
   "js/services/storage.js",
   "vendor/msal-browser.min.js",
@@ -107,6 +112,7 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   // Anmelde-Rückgaben nie aus dem Speicher bedienen
   if (url.pathname.endsWith("/redirect.html") && (url.search || url.hash)) return;
+  if (url.pathname.endsWith("/google-redirect.html")) return;
 
   e.respondWith(
     (async () => {

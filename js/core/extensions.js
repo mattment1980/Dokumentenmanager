@@ -16,6 +16,9 @@
  *                               (nicht für die Vorschau) – z. B. ein Vorschaubild in plan.meta legen
  *   registerHomeSection(def)    Baustein auf der Startseite: { id, render() → HTML, bind(root) }
  *   registerDraftInit(fn)       Entwurf vorbelegen: fn(draft, job)  (läuft immer, auch für abgeschaltete Module)
+ *   registerDoctypeOption(def)  Merkmal je Dokumenttyp, in den Einstellungen als Häkchen umschaltbar
+ *                               def = { key, label, get(doctype) → bool }   (gespeichert als doctype[key])
+ *   registerSettingsSection(def) eigener Abschnitt in den Einstellungen: { id, render() → HTML, bind(root, rerender) }
  *
  * Jede Anmeldung kann zu einem Funktionsmodul gehören: def.feature = "<id>" bzw. bei Funktionen
  * registerSaveFilter(fn, { feature: "<id>" }). Ist das Modul abgeschaltet (core/features.js),
@@ -31,6 +34,8 @@ const saveFilters = [];
 const savePrepares = [];
 const homeSections = [];
 const draftInits = [];
+const doctypeOptions = [];
+const settingsSections = [];
 
 const active = (x) => isEnabled(x.feature);
 
@@ -40,10 +45,15 @@ export const registerSaveFilter = (fn, { feature } = {}) => saveFilters.push({ f
 export const registerSavePrepare = (fn, { feature } = {}) => savePrepares.push({ fn, feature });
 export const registerHomeSection = (def) => homeSections.push(def);
 export const registerDraftInit = (fn) => draftInits.push({ fn });
+export const registerDoctypeOption = (def) => doctypeOptions.push(def);
+export const registerSettingsSection = (def) => settingsSections.push(def);
 
 export const getAiFields = () => aiFields.filter(active);
 export const getReviewSections = (job, draft) => reviewSections.filter((s) => active(s) && (!s.applies || s.applies(job, draft)));
 export const getHomeSections = () => homeSections.filter(active);
+export const getSettingsSections = () => settingsSections.filter(active);
+/** Merkmale je Dokumenttyp; all = auch die abgeschalteter Module (zum Erhalten beim Speichern). */
+export const getDoctypeOptions = ({ all = false } = {}) => (all ? doctypeOptions : doctypeOptions.filter(active));
 
 /** Fester Ablageort, wenn ein Prüfen-Abschnitt ihn vorgibt: { rel, note } oder null. */
 export function getFixedTarget(job, draft) {
