@@ -223,7 +223,11 @@ try {
 } catch {}
 
 /** getToken/graphFetch nur für Tests austauschbar */
+let dlBlockedUntil = 0; // nach komplettem Fehlschlag kurz nicht erneut alle Wege probieren (sonst bremst Microsoft mit 429)
+let dlBlockedMsg = "";
+
 export async function download(url, contentPath, { streamPath = "", getToken = () => token(), graphFetch = gfetch } = {}) {
+  if (Date.now() < dlBlockedUntil) throw new Error(dlBlockedMsg);
   const usable = (m) => (m === "stream" || m === "streamBeta" ? !!streamPath : m === "graph" ? true : !!url);
   const order = [dlMode, ...DL_MODES].filter((m, i, all) => m && all.indexOf(m) === i && usable(m));
   const tried = [];
@@ -256,7 +260,9 @@ export async function download(url, contentPath, { streamPath = "", getToken = (
     }
   }
   // Antwort je Weg mit ausgeben – hilft bei der Fehlersuche, falls Microsoft weiter umstellt
-  throw new Error(`OneDrive: Datei ließ sich nicht herunterladen (${tried.join(", ") || "kein Weg verfügbar"}).`);
+  dlBlockedMsg = `OneDrive: Datei ließ sich nicht herunterladen (${tried.join(", ") || "kein Weg verfügbar"}).`;
+  dlBlockedUntil = Date.now() + 10 * 60 * 1000;
+  throw new Error(dlBlockedMsg);
 }
 
 /** Wird geworfen, wenn eine Datei seit dem Lesen von jemand anderem geändert wurde. */
@@ -457,4 +463,78 @@ export async function probeArchive(a, configName) {
   } finally {
     archive = prev;
   }
+}
+
+/**
+ * Lesetest (Einstellungen → Technisches): prüft mit einer kleinen Testdatei im Archivordner, welche Wege
+ * Microsoft für dieses Konto zulässt – Herunterladen, Graph-Sammelabfrage ($batch) und wie lang die
+ * Beschreibung einer Datei sein darf. Die Testdatei wird danach gelöscht (Papierkorb). Liefert einen Text.
+ */
+export async function readDiagnostics() {
+  const out = [];
+  const name = "_Lesetest.json";
+  const payload = { test: "dokumentenmanager", t: Date.now() };
+  await writeJson([name], payload);
+  const r = await gfetch(itemUrl([name]));
+  const meta = await r.json();
+  const drive = meta.parentReference?.driveId;
+  const id = meta.id;
+  out.push(`Konto: ${account?.username ? account.username.replace(/^(.).*(@.*)$/, "$1…$2") : "?"} · Laufwerk: ${drive?.slice(0, 6)}…`);
+  out.push(`Download-Link: ${String(meta["@microsoft.graph.downloadUrl"] || "–").replace(/^(https:\/\/[^/]+).*$/, "$1")} · tempauth: ${/tempauth/i.test(meta["@microsoft.graph.downloadUrl"] || "") ? "ja" : "nein"}`);
+  dlBlockedUntil = 0;
+  try {
+    await download(meta["@microsoft.graph.downloadUrl"], itemUrl([name]) + "/content", {
+      streamPath: `/drives/${encodeURIComponent(drive)}/items/${encodeURIComponent(id)}/contentStream`,
+    });
+    out.push(`Herunterladen: OK über "${dlMode}"`);
+  } catch (e) {
+    out.push(`Herunterladen: ${e.message}`);
+  }
+  dlBlockedUntil = 0;
+  try {
+    const b = await gfetch("/$batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requests: [{ id: "1", method: "GET", url: `/drives/${drive}/items/${id}/content` }] }),
+    });
+    const j = await b.json();
+    const x = j.responses?.[0] || {};
+    const body = typeof x.body === "string" ? x.body : JSON.stringify(x.body || "");
+    let decoded = "";
+    try {
+      decoded = atob(body);
+    } catch {}
+    const hit = body.includes("dokumentenmanager") || decoded.includes("dokumentenmanager");
+    out.push(`$batch: Status ${b.status}/${x.status}${hit ? " · Inhalt erhalten ✓" : ""}${x.headers?.Location ? " · Weiterleitung" : ""}`);
+  } catch (e) {
+    out.push(`$batch: ${e.message}`);
+  }
+  for (const n of [1000, 4000, 16000, 64000]) {
+    try {
+      const text = "x".repeat(n);
+      const p = await gfetch(itemUrl([name]), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: text }),
+      });
+      if (!p.ok) {
+        out.push(`Beschreibung ${n} Zeichen: abgelehnt (${p.status})`);
+        break;
+      }
+      const g = await (await gfetch(itemUrl([name]) + "?$select=description")).json();
+      const len = (g.description || "").length;
+      out.push(`Beschreibung ${n} Zeichen: ${len === n ? "OK" : `nur ${len} gespeichert`}`);
+      if (len !== n) break;
+    } catch (e) {
+      out.push(`Beschreibung ${n} Zeichen: ${e.message}`);
+      break;
+    }
+  }
+  try {
+    await deleteItem({ driveId: drive, id });
+    out.push("Testdatei gelöscht.");
+  } catch (e) {
+    out.push(`Testdatei nicht gelöscht: ${e.message}`);
+  }
+  return out.join("\n");
 }

@@ -1,5 +1,12 @@
 # Änderungen
 
+## 2.4.3 – Lesetest für OneDrive
+
+- `contentStream` gibt es für private Konten nicht („API not found“). Einstellungen → Technisches →
+  **OneDrive-Lesetest** prüft mit einer Testdatei, welche Wege das Konto zulässt (Download, `$batch`,
+  Länge der Dateibeschreibung), und löscht sie danach.
+- Schlagen alle Download-Wege fehl, versucht die App es 10 Minuten lang nicht erneut (Microsoft bremste mit 429).
+
 ## 2.4.2 – Lesen aus OneDrive über contentStream
 
 - Die Ausweichwege aus 2.4.1 scheitern am neuen Speicher (401 ohne Anmeldung, keine CORS-Freigabe mit Anmeldung,

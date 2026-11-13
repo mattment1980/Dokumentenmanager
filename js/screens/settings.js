@@ -121,6 +121,7 @@ const screen = {
           <button class="btn small" id="copyRu">Umleitungs-URI kopieren</button>
           ${APP.CLIENT_ID ? "" : `<button class="btn small" id="chgCid">Client-ID ändern</button>`}
           <button class="btn small" id="reload">App neu laden</button>
+          <button class="btn small" id="diag">OneDrive-Lesetest</button>
         </div>
       </div>`;
 
@@ -204,6 +205,23 @@ const screen = {
     $("#copyRu").onclick = () => copyText(od.redirectUri());
     $("#chgCid") && ($("#chgCid").onclick = () => resetTo("setup"));
     $("#reload").onclick = () => location.reload();
+    $("#diag").onclick = async () => {
+      if (!S.account) return toast("Bitte zuerst anmelden.");
+      busy("Lesetest läuft …");
+      let txt;
+      try {
+        txt = await od.readDiagnostics();
+      } catch (e) {
+        txt = "Lesetest abgebrochen: " + errText(e);
+      }
+      unbusy();
+      const box = document.createElement("div");
+      box.className = "card";
+      box.innerHTML = `<h2>Ergebnis Lesetest</h2><pre class="mono small" style="white-space:pre-wrap;margin:0 0 10px">${esc(txt)}</pre><button class="btn small" id="diagCopy">Kopieren</button>`;
+      $("#diag").closest(".card").after(box);
+      box.scrollIntoView({ behavior: "smooth" });
+      $("#diagCopy").onclick = () => copyText(txt);
+    };
   },
 
   renderEditor() {
