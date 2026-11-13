@@ -1,5 +1,13 @@
 # Änderungen
 
+## 2.4.1 – Korrektur: Lesen aus OneDrive
+
+- Microsoft stellt privates OneDrive auf neue Speicher um (`my.microsoftpersonalcontent.com`); deren Download-Links
+  antworten teils ohne Anmeldung mit 401. Folge: Konfiguration und Listen (Rechnungen, Gutscheine, Pakete) wurden
+  nicht mehr aus OneDrive gelesen, Speichern von Einstellungen scheiterte mit „Failed to fetch“.
+- Jetzt drei Wege nacheinander (Link ohne Anmeldung → Link mit Microsoft-Anmeldung → über Graph); der funktionierende
+  wird gemerkt. Verständliche Fehlermeldung, falls alle scheitern.
+
 ## 2.4.0 – Google-Kalender
 
 **Neu**

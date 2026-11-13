@@ -196,10 +196,57 @@ export async function readJsonMeta(parts, { archive: a = archive } = {}) {
   if (r.status === 404) return { data: null, eTag: null };
   if (!r.ok) throw await graphError(r);
   const meta = await r.json();
-  const url = meta["@microsoft.graph.downloadUrl"];
-  const d = url ? await fetch(url, { cache: "no-store" }) : await gfetch(itemUrl(parts, a) + "/content");
-  if (!d.ok) throw new Error(`OneDrive: Datei nicht lesbar (${d.status})`);
+  const d = await download(meta["@microsoft.graph.downloadUrl"], itemUrl(parts, a) + "/content");
   return { data: await d.json(), eTag: meta.eTag || null };
+}
+
+/**
+ * Inhalt einer Datei holen. Microsoft stellt privates OneDrive auf neue Speicher um
+ * (my.microsoftpersonalcontent.com); deren Download-Links sind teils nicht mehr „vorab angemeldet“ und
+ * antworten ohne Anmeldung mit 401. Daher drei Wege nacheinander; der zuletzt erfolgreiche wird zuerst versucht:
+ *   "pre"    Download-Link ohne Anmeldung (bisheriges Verfahren)
+ *   "bearer" Download-Link mit Microsoft-Anmeldung
+ *   "graph"  über Graph …/content (Weiterleitung zum Speicher)
+ * Es geht nur ein Microsoft-Zugriffsschlüssel an Microsoft-Adressen (my.microsoftpersonalcontent.com u. a.,
+ * siehe CSP), nie an fremde Server.
+ */
+const DL_MODES = ["pre", "bearer", "graph"];
+let dlMode = "";
+try {
+  dlMode = localStorage.getItem("dm.dlMode") || "";
+} catch {}
+
+/** getToken/graphFetch nur für Tests austauschbar */
+export async function download(url, contentPath, { getToken = () => token(), graphFetch = gfetch } = {}) {
+  const order = [dlMode, ...DL_MODES].filter((m, i, all) => m && all.indexOf(m) === i && (url || m === "graph"));
+  let last = null;
+  for (const m of order) {
+    try {
+      const d =
+        m === "pre"
+          ? await fetch(url, { cache: "no-store" })
+          : m === "bearer"
+          ? await fetch(url, { cache: "no-store", headers: { Authorization: `Bearer ${await getToken()}` } })
+          : await graphFetch(contentPath, { cache: "no-store" });
+      if (d.ok) {
+        if (m !== dlMode) {
+          dlMode = m;
+          try {
+            localStorage.setItem("dm.dlMode", m);
+          } catch {}
+          console.info(`OneDrive-Download über "${m}"`);
+        }
+        return d;
+      }
+      last = new Error(`OneDrive: Datei nicht lesbar (${d.status})`);
+    } catch (e) {
+      if (e instanceof AuthNeeded) throw e;
+      last = e;
+    }
+  }
+  throw new Error(
+    `OneDrive: Datei ließ sich nicht herunterladen (${last?.message === "Failed to fetch" ? "Download von Microsoft verweigert" : last?.message || "unbekannt"}).`
+  );
 }
 
 /** Wird geworfen, wenn eine Datei seit dem Lesen von jemand anderem geändert wurde. */
